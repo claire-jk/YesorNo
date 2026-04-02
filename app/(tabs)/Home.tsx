@@ -97,72 +97,79 @@ export default function Home() {
         setCustomAlert({ visible: true, title, message, type });
     };
 
-    // 自定義確認視窗觸發器
     const showConfirm = (title: string, message: string, onConfirm: () => void) => {
         setConfirmConfig({ visible: true, title, message, onConfirm });
     };
 
-    // 初始化與監聽
+    // 初始化：監聽 Auth 與 個人清單/家庭列表
     useEffect(() => {
-        const initAppData = async () => {
-            const id = await AsyncStorage.getItem('currentFamilyId');
+        let unsubSelf: (() => void) | undefined;
+        let unsubFamMembers: (() => void) | undefined;
 
-            const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-                if (!user) {
+        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                setLoading(false);
+                setIsDataInitialized(true);
+                return;
+            }
+
+            // 1. 監聽個人清單
+            const qSelf = query(collection(db, 'wishlist'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
+            unsubSelf = onSnapshot(qSelf, (snap) => {
+                setWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
+            });
+
+            // 2. 監聽家庭成員關係
+            const qFamMember = query(collection(db, 'family_members'), where('userId', '==', user.uid));
+            unsubFamMembers = onSnapshot(qFamMember, async (snap) => {
+                if (snap.empty) {
+                    setFamilies([]);
                     setLoading(false);
                     setIsDataInitialized(true);
                     return;
                 }
 
-                const qSelf = query(collection(db, 'wishlist'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
-                const unsubSelf = onSnapshot(qSelf, (snap) => {
-                    setWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
-                });
+                const famIds = snap.docs.map(d => d.data().familyId);
+                // 根據 ID 抓取家庭詳細資料
+                const famDataList: Family[] = [];
+                for (const fId of famIds) {
+                    const fDoc = await getDocs(query(collection(db, 'families'), where('__name__', '==', fId)));
+                    fDoc.forEach(d => famDataList.push({ id: d.id, ...d.data() } as Family));
+                }
+                setFamilies(famDataList);
 
-                const qFamMember = query(collection(db, 'family_members'), where('userId', '==', user.uid));
-                const unsubFam = onSnapshot(qFamMember, async (snap) => {
-                    if (snap.empty) {
-                        setFamilies([]);
-                        setLoading(false);
-                        setIsDataInitialized(true);
-                        return;
-                    }
-
-                    const famMap = new Map();
-                    const promises = snap.docs.map(async (docSnap) => {
-                        const fId = docSnap.data().familyId;
-                        const fDoc = await getDocs(query(collection(db, 'families'), where('__name__', '==', fId)));
-                        fDoc.forEach(d => famMap.set(d.id, { id: d.id, ...d.data() }));
-                    });
-
-                    await Promise.all(promises);
-                    const uniqueFams = Array.from(famMap.values()) as Family[];
-                    setFamilies(uniqueFams);
-
-                    if (uniqueFams.length > 0 && isInitialMount.current) {
-                        let targetFamily = id ? uniqueFams.find(f => f.id === id) : uniqueFams[0];
-                        if (!targetFamily) targetFamily = uniqueFams[0];
-                        setCurrentFamily(targetFamily);
-                        switchMode('family');
-                        isInitialMount.current = false;
-                    }
-
-                    setLoading(false);
-                    setIsDataInitialized(true);
-                });
-
-                return () => { unsubSelf(); unsubFam(); };
+                // 處理初次載入的家庭切換
+                if (famDataList.length > 0 && isInitialMount.current) {
+                    const savedId = await AsyncStorage.getItem('currentFamilyId');
+                    let targetFamily = savedId ? famDataList.find(f => f.id === savedId) : famDataList[0];
+                    if (!targetFamily) targetFamily = famDataList[0];
+                    setCurrentFamily(targetFamily);
+                    switchMode('family');
+                    isInitialMount.current = false;
+                }
+                setLoading(false);
+                setIsDataInitialized(true);
             });
+        });
+
+        return () => {
+            unsubscribeAuth();
+            if (unsubSelf) unsubSelf();
+            if (unsubFamMembers) unsubFamMembers();
         };
-        initAppData();
     }, []);
 
+    // 當 currentFamily 改變時，監聽該家庭的清單
     useEffect(() => {
-        if (!currentFamily) { setFamilyWishList([]); return; }
+        if (!currentFamily) { 
+            setFamilyWishList([]); 
+            return; 
+        }
         const qFamWish = query(collection(db, 'family_wishlist'), where('familyId', '==', currentFamily.id), orderBy('createdAt', 'desc'));
-        return onSnapshot(qFamWish, (snap) => {
+        const unsubscribe = onSnapshot(qFamWish, (snap) => {
             setFamilyWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
         });
+        return () => unsubscribe();
     }, [currentFamily]);
 
     const handleAddItem = async (isFamily = false) => {
@@ -203,6 +210,8 @@ export default function Home() {
                 if (snap.empty) { showAlert('錯誤', '找不到該邀請碼', 'error'); return; }
                 const famId = snap.docs[0].id;
                 const famData = snap.docs[0].data() as Family;
+                
+                // 檢查是否已在家庭中（選填，Firebase 安全規則也可限制）
                 await addDoc(collection(db, 'family_members'), { familyId: famId, userId: auth.currentUser?.uid });
                 await AsyncStorage.setItem('currentFamilyId', famId);
                 setCurrentFamily({ ...famData, id: famId });
@@ -332,7 +341,7 @@ export default function Home() {
                             autoFocus 
                         />
                         <View style={styles.modalButtons}>
-                            <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.textBtn}>
+                            <TouchableOpacity onPress={() => { setModalVisible(false); setNewItemName(''); }} style={styles.textBtn}>
                                 <Text style={[styles.textBtnLabel, { color: Colors.subText }]}>取消</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.pillBtn, { backgroundColor: Colors.primary }]} onPress={() => handleAddItem(mode === 'family')}>
@@ -357,7 +366,7 @@ export default function Home() {
                             autoCapitalize={familyAction === 'join' ? "characters" : "none"}
                         />
                         <View style={styles.modalButtons}>
-                            <TouchableOpacity onPress={() => setCreateJoinModalVisible(false)} style={styles.textBtn}>
+                            <TouchableOpacity onPress={() => { setCreateJoinModalVisible(false); setInputVal(''); }} style={styles.textBtn}>
                                 <Text style={[styles.textBtnLabel, { color: Colors.subText }]}>返回</Text>
                             </TouchableOpacity>
                             <TouchableOpacity style={[styles.pillBtn, { backgroundColor: Colors.primary }]} onPress={handleFamilyAction}>
@@ -388,7 +397,7 @@ export default function Home() {
                 </View>
             </Modal>
 
-            {/* 4. 自定義確認 Confirm (取代 Alert.alert) */}
+            {/* 4. 自定義確認 Confirm */}
             <Modal animationType="fade" transparent visible={confirmConfig.visible}>
                 <View style={styles.modalOverlay}>
                     <View style={[styles.alertBubble, { backgroundColor: Colors.card }]}>
@@ -418,7 +427,7 @@ export default function Home() {
                 </View>
             </Modal>
 
-            {/* 5. 家庭切換 */}
+            {/* 5. 家庭切換 Drawer */}
             <Modal animationType="slide" transparent visible={familyModalVisible}>
                 <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setFamilyModalVisible(false)}>
                     <View style={[styles.drawerModal, { backgroundColor: Colors.card }]}>
