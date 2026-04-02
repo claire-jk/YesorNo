@@ -72,8 +72,8 @@ export default function TabNavigator() {
       })}
     >
       <Tab.Screen name="首頁" component={Home} />
-      <Tab.Screen name="個人" component={SelfList} />
       <Tab.Screen name="掃描" component={Scan} />
+      <Tab.Screen name="個人" component={SelfList} />
       <Tab.Screen name="家庭" component={Family} />
       <Tab.Screen name="報表" component={Report} />
     </Tab.Navigator>
