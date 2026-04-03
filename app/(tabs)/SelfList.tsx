@@ -1,3 +1,4 @@
+//個人清單頁面
 import { useFonts, ZenKurenaido_400Regular } from '@expo-google-fonts/zen-kurenaido';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -15,6 +16,7 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -78,6 +80,7 @@ export default function SelfList() {
   const [catModalVisible, setCatModalVisible] = useState(false);
   const [prodModalVisible, setProdModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [isUploading, setIsUploading] = useState(false); // 新增：上傳狀態
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [newCatName, setNewCatName] = useState('');
@@ -87,12 +90,16 @@ export default function SelfList() {
 
   const scrollX = useRef(new Animated.Value(0)).current;
 
+  // --- Cloudinary 設定 ---
+  const CLOUD_NAME = "dfbzt23lp"; // 🚩 請替換成你的 Cloud Name
+  const UPLOAD_PRESET = "YesorNoself"; // 🚩 請替換成你的 Unsigned Preset 名稱
+
   const Colors = {
     bg: isDarkMode ? '#121212' : '#F1F5F9',
     card: isDarkMode ? '#1E293B' : '#FFFFFF',
     text: isDarkMode ? '#F8FAFC' : '#1E293B',
     subText: isDarkMode ? '#94A3B8' : '#64748B',
-    primary: activeTab === 'owned' ? '#6366F1' : '#F43F5E', // 不同分頁給予不同主色
+    primary: activeTab === 'owned' ? '#6366F1' : '#F43F5E',
     accent: '#10B981',
     inputBg: isDarkMode ? '#334155' : '#F8FAFC',
     border: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
@@ -136,30 +143,79 @@ export default function SelfList() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.5,
+      quality: 0.6,
     });
     if (!result.canceled) {
       setSelectedImg(result.assets[0].uri);
-      setProductForm({ ...productForm, image: result.assets[0].uri });
+    }
+  };
+
+  // --- Cloudinary 上傳邏輯 ---
+  const uploadToCloudinary = async (uri: string) => {
+    if (!uri || uri.startsWith('http')) return uri;
+
+    const data = new FormData();
+    data.append('file', {
+      uri: uri,
+      type: 'image/jpeg',
+      name: 'upload.jpg',
+    } as any);
+    data.append('upload_preset', UPLOAD_PRESET);
+
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+        method: 'POST',
+        body: data,
+      });
+      const result = await response.json();
+      if (result.secure_url) {
+        return result.secure_url;
+      } else {
+        throw new Error(result.error?.message || "上傳失敗");
+      }
+    } catch (error) {
+      console.error("Cloudinary Error:", error);
+      throw error;
     }
   };
 
   const saveProduct = async () => {
-    if (!productForm.name || !selectedCategory) return;
-    const data = {
-      ...productForm,
-      categoryId: selectedCategory.id,
-      type: activeTab,
-      userId: auth.currentUser?.uid,
-      updatedAt: serverTimestamp()
-    };
-
-    if (isEditing && editingId) {
-      await updateDoc(doc(db, 'products', editingId), data);
-    } else {
-      await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() });
+    if (!productForm.name || !selectedCategory) {
+        Alert.alert("提示", "請輸入物品名稱");
+        return;
     }
-    closeProdModal();
+    
+    setIsUploading(true); // 開始讀取
+
+    try {
+      // 1. 處理圖片上傳
+      let finalImageUrl = productForm.image || '';
+      if (selectedImg && !selectedImg.startsWith('http')) {
+        finalImageUrl = await uploadToCloudinary(selectedImg);
+      }
+
+      // 2. 準備資料
+      const data = {
+        ...productForm,
+        image: finalImageUrl,
+        categoryId: selectedCategory.id,
+        type: activeTab,
+        userId: auth.currentUser?.uid,
+        updatedAt: serverTimestamp()
+      };
+
+      // 3. 寫入 Firebase
+      if (isEditing && editingId) {
+        await updateDoc(doc(db, 'products', editingId), data);
+      } else {
+        await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() });
+      }
+      closeProdModal();
+    } catch (error) {
+      Alert.alert("上傳失敗", "無法儲存圖片或資料，請檢查 Cloudinary 設定");
+    } finally {
+      setIsUploading(false); // 結束讀取
+    }
   };
 
   const openEditModal = (item: Product) => {
@@ -242,11 +298,10 @@ export default function SelfList() {
                     <Text style={[styles.preorderText, {color: Colors.subText}]}>{item.arrivalMonth} 到貨</Text>
                     <Text style={[styles.remainingText, { color: Colors.primary }]}>待付: ${item.remainingAmount || 0}</Text>
                   </View>
-                  {/* 小進度條 */}
                   <View style={styles.progressBarBg}>
                     <View style={[styles.progressBarFill, { 
                         backgroundColor: Colors.primary, 
-                        width: `${Math.min(100, (parseInt(item.paidAmount || '0') / parseInt(item.totalPrice || '1')) * 100)}%` 
+                        width: `${Math.min(100, (parseInt(item.paidAmount || '0') / (parseInt(item.totalPrice || '1') || 1)) * 100)}%` 
                     }]} />
                   </View>
                 </View>
@@ -322,13 +377,19 @@ export default function SelfList() {
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '加入清單'}</Text>
             
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
-              <TouchableOpacity style={[styles.imagePicker, { backgroundColor: Colors.inputBg }]} onPress={pickImage}>
+              <TouchableOpacity style={[styles.imagePicker, { backgroundColor: Colors.inputBg }]} onPress={pickImage} disabled={isUploading}>
                 {selectedImg ? (
                   <Image source={{ uri: selectedImg }} style={styles.previewImg} />
                 ) : (
                   <View style={styles.imagePlaceholder}>
                     <Ionicons name="image-outline" size={48} color={Colors.subText} />
                     <Text style={{color: Colors.subText, marginTop: 10, fontFamily: 'ZenKurenaido'}}>點擊上傳圖片</Text>
+                  </View>
+                )}
+                {isUploading && (
+                  <View style={styles.uploadingOverlay}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                    <Text style={{color: '#FFF', marginTop: 5}}>上傳中...</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -388,9 +449,19 @@ export default function SelfList() {
             </ScrollView>
             
             <View style={styles.actionRow}>
-              <TouchableOpacity onPress={closeProdModal} style={styles.cancelBtn}><Text style={styles.cancelBtnText}>取消</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.mainBtn, {backgroundColor: Colors.primary}]} onPress={saveProduct}>
-                <Text style={styles.mainBtnText}>{isEditing ? '更新內容' : '確認新增'}</Text>
+              <TouchableOpacity onPress={closeProdModal} style={styles.cancelBtn} disabled={isUploading}>
+                <Text style={styles.cancelBtnText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.mainBtn, {backgroundColor: isUploading ? '#CBD5E1' : Colors.primary}]} 
+                onPress={saveProduct}
+                disabled={isUploading}
+              >
+                {isUploading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.mainBtnText}>{isEditing ? '更新內容' : '確認新增'}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -437,14 +508,12 @@ const styles = StyleSheet.create({
   mainTitle: { fontSize: 34, fontFamily: 'ZenKurenaido' },
   subTitle: { fontSize: 16, fontFamily: 'ZenKurenaido', marginBottom: 25, opacity: 0.8 },
   
-  // --- Tab 樣式 ---
   tabSection: { paddingHorizontal: 30, marginBottom: 25 },
   tabBar: { flexDirection: 'row', height: 55, borderRadius: 28, padding: 6 },
   tabIndicator: { position: 'absolute', width: '50%', height: '100%', borderRadius: 24, top: 6, left: 6, elevation: 2, shadowOpacity: 0.1 },
   tabItem: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabLabel: { fontSize: 16, fontFamily: 'ZenKurenaido' },
 
-  // --- 分類卡片 ---
   catScroll: { paddingHorizontal: 20, paddingBottom: 120 },
   catWrapper: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   categoryCard: { 
@@ -456,12 +525,10 @@ const styles = StyleSheet.create({
   typeBadge: { marginTop: 10, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
   typeText: { fontSize: 11, fontFamily: 'ZenKurenaido' },
 
-  // --- 詳情頁 Header ---
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 20 },
   headerTitle: { fontSize: 22, fontFamily: 'ZenKurenaido' },
   glassBtn: { width: 45, height: 45, borderRadius: 15, justifyContent: 'center', alignItems: 'center' },
 
-  // --- 商品列表/網格 ---
   listContent: { padding: 20, paddingBottom: 100 },
   gridCard: { width: '47%', margin: '1.5%', borderRadius: 24, overflow: 'hidden', elevation: 3, shadowOpacity: 0.1, marginBottom: 20 },
   listCard: { flexDirection: 'row', marginBottom: 15, borderRadius: 24, padding: 12, alignItems: 'center', elevation: 2, shadowOpacity: 0.05 },
@@ -483,10 +550,8 @@ const styles = StyleSheet.create({
   emptyContainer: { alignItems: 'center', marginTop: 100, opacity: 0.5 },
   emptyText: { marginTop: 15, fontFamily: 'ZenKurenaido', fontSize: 16 },
 
-  // --- 懸浮按鈕 ---
   fab: { position: 'absolute', right: 25, bottom: 40, width: 68, height: 68, borderRadius: 34, justifyContent: 'center', alignItems: 'center', elevation: 8, shadowOpacity: 0.3 },
 
-  // --- Modal 彈窗 ---
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   modalIndicator: { width: 40, height: 5, backgroundColor: '#CBD5E1', borderRadius: 3, alignSelf: 'center', marginBottom: 20 },
   modalCard: { width: '100%', borderTopLeftRadius: 40, borderTopRightRadius: 40, padding: 25, alignItems: 'center' },
@@ -498,12 +563,13 @@ const styles = StyleSheet.create({
   actionRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 15 },
   cancelBtn: { paddingVertical: 15, paddingHorizontal: 25 },
   cancelBtnText: { color: '#94A3B8', fontFamily: 'ZenKurenaido', fontSize: 16 },
-  mainBtn: { paddingVertical: 16, paddingHorizontal: 40, borderRadius: 20, elevation: 4 },
+  mainBtn: { paddingVertical: 16, paddingHorizontal: 40, borderRadius: 20, elevation: 4, justifyContent: 'center', alignItems: 'center', minWidth: 140 },
   mainBtnText: { color: '#FFF', fontFamily: 'ZenKurenaido', fontSize: 16 },
   
-  imagePicker: { width: '100%', height: 220, borderRadius: 25, borderStyle: 'dashed', borderWidth: 1.5, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 25, overflow: 'hidden' },
+  imagePicker: { width: '100%', height: 220, borderRadius: 25, borderStyle: 'dashed', borderWidth: 1.5, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 25, overflow: 'hidden', position: 'relative' },
   imagePlaceholder: { alignItems: 'center' },
   previewImg: { width: '100%', height: '100%' },
+  uploadingOverlay: { position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' },
   monthPick: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 15, marginRight: 10 },
   preorderInputs: { width: '100%' }
 });
