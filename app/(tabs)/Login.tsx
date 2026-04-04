@@ -2,16 +2,26 @@ import { Ionicons } from '@expo/vector-icons';
 import { sendPasswordResetEmail, signInWithEmailAndPassword } from 'firebase/auth';
 import React, { useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView, ScrollView,
-    StyleSheet, Text,
-    TextInput, TouchableOpacity,
-    useColorScheme,
-    View
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView, ScrollView,
+  StyleSheet, Text,
+  TextInput, TouchableOpacity,
+  useColorScheme,
+  View
 } from 'react-native';
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring
+} from 'react-native-reanimated';
 import { auth } from './firebaseConfig';
+
+const { width } = Dimensions.get('window');
 
 interface LoginProps {
   onNavigate: () => void;
@@ -21,6 +31,8 @@ export default function Login({ onNavigate }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isEmailFocused, setIsEmailFocused] = useState(false);
+  const [isPassFocused, setIsPassFocused] = useState(false);
   
   // 自定義提示訊息狀態
   const [modalVisible, setModalVisible] = useState(false);
@@ -28,6 +40,9 @@ export default function Login({ onNavigate }: LoginProps) {
 
   const colorScheme = useColorScheme();
   const isDarkMode = colorScheme === 'dark';
+
+  // 按鈕縮放動畫 Shared Value
+  const loginBtnScale = useSharedValue(1);
 
   const Colors = {
     bg: isDarkMode ? '#121212' : '#FFFFFF',
@@ -38,6 +53,13 @@ export default function Login({ onNavigate }: LoginProps) {
     secondary: isDarkMode ? '#AAAAAA' : '#666666',
     modalBg: isDarkMode ? '#252525' : '#FFFFFF',
   };
+
+  const animatedButtonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: loginBtnScale.value }]
+  }));
+
+  const handlePressIn = () => (loginBtnScale.value = withSpring(0.95));
+  const handlePressOut = () => (loginBtnScale.value = withSpring(1));
 
   // 封裝美化版提示
   const showCustomAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -73,6 +95,9 @@ export default function Login({ onNavigate }: LoginProps) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: Colors.bg }]}>
+      {/* 裝飾性背景圓球 */}
+      <View style={[styles.bgCircle, { backgroundColor: Colors.primary, opacity: 0.05, top: -50, right: -50 }]} />
+      
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
@@ -82,36 +107,56 @@ export default function Login({ onNavigate }: LoginProps) {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
+          {/* Logo 與標題動畫區 */}
+          <Animated.View entering={FadeInDown.duration(800).springify()} style={styles.header}>
             <View style={styles.logoCircle}>
               <Ionicons name="cart" size={45} color="white" />
             </View>
             <Text style={[styles.title, { color: Colors.text }]}>購了沒？</Text>
             <Text style={[styles.subtitle, { color: Colors.secondary }]}>最懂你的購物小幫手</Text>
-          </View>
+          </Animated.View>
 
-          <View style={styles.inputContainer}>
-            <View style={[styles.inputWrapper, { backgroundColor: Colors.inputBg, borderColor: Colors.inputBorder }]}>
-              <Ionicons name="mail-outline" size={20} color={Colors.secondary} style={styles.inputIcon} />
+          {/* 輸入框區塊動畫 */}
+          <Animated.View entering={FadeInUp.delay(200).duration(800).springify()} style={styles.inputContainer}>
+            <View style={[
+              styles.inputWrapper, 
+              { 
+                backgroundColor: Colors.inputBg, 
+                borderColor: isEmailFocused ? Colors.primary : Colors.inputBorder,
+                borderWidth: isEmailFocused ? 2 : 1
+              }
+            ]}>
+              <Ionicons name="mail-outline" size={20} color={isEmailFocused ? Colors.primary : Colors.secondary} style={styles.inputIcon} />
               <TextInput 
                 style={[styles.input, { color: Colors.text }]} 
                 placeholder="電子郵件" 
                 placeholderTextColor="#999"
                 value={email}
                 onChangeText={setEmail}
+                onFocus={() => setIsEmailFocused(true)}
+                onBlur={() => setIsEmailFocused(false)}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
             </View>
 
-            <View style={[styles.inputWrapper, { backgroundColor: Colors.inputBg, borderColor: Colors.inputBorder }]}>
-              <Ionicons name="lock-closed-outline" size={20} color={Colors.secondary} style={styles.inputIcon} />
+            <View style={[
+              styles.inputWrapper, 
+              { 
+                backgroundColor: Colors.inputBg, 
+                borderColor: isPassFocused ? Colors.primary : Colors.inputBorder,
+                borderWidth: isPassFocused ? 2 : 1
+              }
+            ]}>
+              <Ionicons name="lock-closed-outline" size={20} color={isPassFocused ? Colors.primary : Colors.secondary} style={styles.inputIcon} />
               <TextInput 
                 style={[styles.input, { color: Colors.text }]} 
                 placeholder="密碼" 
                 placeholderTextColor="#999"
                 value={password}
                 onChangeText={setPassword}
+                onFocus={() => setIsPassFocused(true)}
+                onBlur={() => setIsPassFocused(false)}
                 secureTextEntry={!showPassword}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
@@ -126,31 +171,41 @@ export default function Login({ onNavigate }: LoginProps) {
             <TouchableOpacity onPress={handleForgotPassword} style={styles.forgotBtn}>
               <Text style={[styles.forgotText, { color: Colors.primary }]}>忘記密碼？</Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.buttonText}>立即登入</Text>
-          </TouchableOpacity>
+          {/* 按鈕區塊動畫 */}
+          <Animated.View entering={FadeInUp.delay(400).duration(800).springify()}>
+            <TouchableOpacity 
+              activeOpacity={0.9}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+              onPress={handleLogin}
+            >
+              <Animated.View style={[styles.loginButton, animatedButtonStyle]}>
+                <Text style={styles.buttonText}>立即登入</Text>
+              </Animated.View>
+            </TouchableOpacity>
 
-          <View style={styles.divider}>
-            <View style={[styles.line, { backgroundColor: Colors.inputBorder }]} />
-            <Text style={[styles.dividerText, { color: Colors.secondary }]}>快速登入</Text>
-            <View style={[styles.line, { backgroundColor: Colors.inputBorder }]} />
-          </View>
+            <View style={styles.divider}>
+              <View style={[styles.line, { backgroundColor: Colors.inputBorder }]} />
+              <Text style={[styles.dividerText, { color: Colors.secondary }]}>快速登入</Text>
+              <View style={[styles.line, { backgroundColor: Colors.inputBorder }]} />
+            </View>
 
-          <TouchableOpacity 
-            style={styles.googleButton}
-            onPress={() => showCustomAlert('公告', 'Google 登入開發中', 'info')}
-          >
-            <Ionicons name="logo-google" size={20} color="white" style={{ marginRight: 10 }} />
-            <Text style={styles.buttonText}>Google 帳號</Text>
-          </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.googleButton}
+              onPress={() => showCustomAlert('公告', 'Google 登入開發中', 'info')}
+            >
+              <Ionicons name="logo-google" size={20} color="white" style={{ marginRight: 10 }} />
+              <Text style={styles.buttonText}>Google 帳號</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.registerLink} onPress={onNavigate}>
-            <Text style={[styles.registerText, { color: Colors.secondary }]}>
-              還沒有帳號？ <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>立即註冊</Text>
-            </Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={styles.registerLink} onPress={onNavigate}>
+              <Text style={[styles.registerText, { color: Colors.secondary }]}>
+                還沒有帳號？ <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>立即註冊</Text>
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -162,7 +217,10 @@ export default function Login({ onNavigate }: LoginProps) {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalView, { backgroundColor: Colors.modalBg }]}>
+          <Animated.View 
+            entering={FadeInUp} 
+            style={[styles.modalView, { backgroundColor: Colors.modalBg }]}
+          >
             <View style={[styles.modalIconCircle, { backgroundColor: modalConfig.type === 'error' ? '#FFEDED' : '#EEF9F1' }]}>
               <Ionicons 
                 name={modalConfig.type === 'success' ? 'checkmark-circle' : modalConfig.type === 'error' ? 'close-circle' : 'information-circle'} 
@@ -178,7 +236,7 @@ export default function Login({ onNavigate }: LoginProps) {
             >
               <Text style={styles.modalButtonText}>我知道了</Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
     </SafeAreaView>
@@ -187,18 +245,52 @@ export default function Login({ onNavigate }: LoginProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  bgCircle: { position: 'absolute', width: 250, height: 250, borderRadius: 125 },
   scrollContent: { paddingHorizontal: 30, paddingVertical: 50, flexGrow: 1, justifyContent: 'center' },
   header: { alignItems: 'center', marginBottom: 40 },
-  logoCircle: { backgroundColor: '#FF6F61', padding: 15, borderRadius: 25, marginBottom: 15, elevation: 5, shadowColor: '#FF6F61', shadowOpacity: 0.3, shadowRadius: 10 },
+  logoCircle: { 
+    backgroundColor: '#FF6F61', 
+    padding: 15, 
+    borderRadius: 25, 
+    marginBottom: 15, 
+    elevation: 10, 
+    shadowColor: '#FF6F61', 
+    shadowOpacity: 0.4, 
+    shadowRadius: 15,
+    shadowOffset: { width: 0, height: 5 }
+  },
   title: { fontSize: 36, fontFamily: 'ZenKurenaido', fontWeight: '600' },
   subtitle: { fontSize: 16, fontFamily: 'ZenKurenaido', marginTop: 5 },
   inputContainer: { width: '100%', marginBottom: 20 },
-  inputWrapper: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderRadius: 15, paddingHorizontal: 15, marginBottom: 15, height: 60 },
+  inputWrapper: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    borderRadius: 15, 
+    paddingHorizontal: 15, 
+    marginBottom: 15, 
+    height: 60,
+    // 微陰影
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2
+  },
   inputIcon: { marginRight: 10 },
   input: { flex: 1, fontFamily: 'ZenKurenaido', fontSize: 18 },
   forgotBtn: { alignSelf: 'flex-end' },
   forgotText: { fontFamily: 'ZenKurenaido', fontSize: 14 },
-  loginButton: { backgroundColor: '#FF6F61', padding: 18, borderRadius: 15, alignItems: 'center', marginBottom: 20, elevation: 3 },
+  loginButton: { 
+    backgroundColor: '#FF6F61', 
+    padding: 18, 
+    borderRadius: 15, 
+    alignItems: 'center', 
+    marginBottom: 20, 
+    elevation: 5,
+    shadowColor: '#FF6F61',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 }
+  },
   googleButton: { backgroundColor: '#4285F4', padding: 15, borderRadius: 15, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   buttonText: { color: '#fff', fontSize: 18, fontFamily: 'ZenKurenaido' },
   divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 25 },

@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "YesorNo",
+    "name": "購了沒",
     "slug": "YesorNo",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/購了沒.png",
     "scheme": "yesorno",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,

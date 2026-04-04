@@ -2,16 +2,26 @@ import { Ionicons } from '@expo/vector-icons';
 import { createUserWithEmailAndPassword } from 'firebase/auth';
 import React, { useState } from 'react';
 import {
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    SafeAreaView, ScrollView,
-    StyleSheet, Text,
-    TextInput, TouchableOpacity,
-    useColorScheme,
-    View
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView, ScrollView,
+  StyleSheet, Text,
+  TextInput, TouchableOpacity,
+  useColorScheme,
+  View
 } from 'react-native';
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring
+} from 'react-native-reanimated';
 import { auth } from './firebaseConfig';
+
+const { width } = Dimensions.get('window');
 
 interface RegisterProps {
   onNavigate: () => void;
@@ -23,6 +33,9 @@ export default function Register({ onNavigate }: RegisterProps) {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPwd, setShowPwd] = useState(false);
   const [showConfirmPwd, setShowConfirmPwd] = useState(false);
+  
+  // 焦點狀態
+  const [focusedField, setFocusedField] = useState<string | null>(null);
 
   // 自定義提示訊息狀態
   const [modalVisible, setModalVisible] = useState(false);
@@ -31,17 +44,26 @@ export default function Register({ onNavigate }: RegisterProps) {
   const colorScheme = useColorScheme();
   const isDarkMode = colorScheme === 'dark';
 
+  // 按鈕動畫 Shared Value
+  const buttonScale = useSharedValue(1);
+
   const Colors = {
-    bg: isDarkMode ? '#121212' : '#FFFFFF',
-    text: isDarkMode ? '#FFFFFF' : '#333333',
-    inputBg: isDarkMode ? '#1E1E1E' : '#F8F9FA',
-    inputBorder: isDarkMode ? '#333333' : '#E0E0E0',
+    bg: isDarkMode ? '#121212' : '#FDFDFD',
+    text: isDarkMode ? '#FFFFFF' : '#2D3436',
+    inputBg: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+    inputBorder: isDarkMode ? '#333333' : '#F0F0F0',
     primary: '#FF6F61',
-    secondary: isDarkMode ? '#AAAAAA' : '#666666',
+    secondary: isDarkMode ? '#AAAAAA' : '#636E72',
     modalBg: isDarkMode ? '#252525' : '#FFFFFF',
   };
 
-  // 封裝美化版提示函式
+  const animatedButtonStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: buttonScale.value }]
+  }));
+
+  const handlePressIn = () => (buttonScale.value = withSpring(0.95));
+  const handlePressOut = () => (buttonScale.value = withSpring(1));
+
   const showCustomAlert = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setModalConfig({ title, message, type });
     setModalVisible(true);
@@ -74,6 +96,9 @@ export default function Register({ onNavigate }: RegisterProps) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: Colors.bg }]}>
+      {/* 背景裝飾 */}
+      <View style={[styles.bgCircle, { backgroundColor: Colors.primary, opacity: 0.05, bottom: -80, left: -80 }]} />
+      
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
         style={{ flex: 1 }}
@@ -84,72 +109,122 @@ export default function Register({ onNavigate }: RegisterProps) {
           keyboardShouldPersistTaps="handled"
         >
           {/* 返回按鈕 */}
-          <TouchableOpacity style={styles.backButton} onPress={onNavigate}>
-            <Ionicons name="chevron-back" size={28} color={Colors.text} />
-          </TouchableOpacity>
+          <Animated.View entering={FadeInDown.duration(600)}>
+            <TouchableOpacity style={styles.backButton} onPress={onNavigate}>
+              <View style={[styles.backIconWrapper, { borderColor: Colors.inputBorder }]}>
+                <Ionicons name="chevron-back" size={24} color={Colors.text} />
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
 
-          <View style={styles.header}>
+          <Animated.View entering={FadeInDown.delay(200).duration(800).springify()} style={styles.header}>
             <Text style={[styles.title, { color: Colors.text }]}>加入購了沒</Text>
-            <Text style={[styles.subtitle, { color: Colors.secondary }]}>開啟您的智慧購物之旅</Text>
-          </View>
+            <Text style={[styles.subtitle, { color: Colors.secondary }]}>最懂你的智慧購物管家 <Text style={{color: Colors.primary}}>●</Text></Text>
+          </Animated.View>
 
           <View style={styles.inputContainer}>
             {/* 電子郵件 */}
-            <View style={[styles.inputWrapper, { backgroundColor: Colors.inputBg, borderColor: Colors.inputBorder }]}>
-              <Ionicons name="mail-outline" size={20} color={Colors.secondary} style={styles.inputIcon} />
-              <TextInput 
-                style={[styles.input, { color: Colors.text }]} 
-                placeholder="電子郵件" 
-                placeholderTextColor="#999"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-            </View>
+            <Animated.View entering={FadeInUp.delay(400).duration(800)}>
+              <View style={[
+                styles.inputWrapper, 
+                { 
+                  backgroundColor: Colors.inputBg, 
+                  borderColor: focusedField === 'email' ? Colors.primary : Colors.inputBorder,
+                  borderWidth: focusedField === 'email' ? 1.5 : 1
+                }
+              ]}>
+                <Ionicons name="mail-outline" size={20} color={focusedField === 'email' ? Colors.primary : Colors.secondary} style={styles.inputIcon} />
+                <TextInput 
+                  style={[styles.input, { color: Colors.text }]} 
+                  placeholder="電子郵件" 
+                  placeholderTextColor="#BDBDBD"
+                  value={email}
+                  onChangeText={setEmail}
+                  onFocus={() => setFocusedField('email')}
+                  onBlur={() => setFocusedField(null)}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+              </View>
+            </Animated.View>
 
             {/* 密碼 */}
-            <View style={[styles.inputWrapper, { backgroundColor: Colors.inputBg, borderColor: Colors.inputBorder }]}>
-              <Ionicons name="lock-closed-outline" size={20} color={Colors.secondary} style={styles.inputIcon} />
-              <TextInput 
-                style={[styles.input, { color: Colors.text }]} 
-                placeholder="設定密碼 (至少6位)" 
-                placeholderTextColor="#999"
-                secureTextEntry={!showPwd}
-                value={password}
-                onChangeText={setPassword}
-              />
-              <TouchableOpacity onPress={() => setShowPwd(!showPwd)}>
-                <Ionicons name={showPwd ? "eye-outline" : "eye-off-outline"} size={22} color={Colors.secondary} />
-              </TouchableOpacity>
-            </View>
+            <Animated.View entering={FadeInUp.delay(500).duration(800)}>
+              <View style={[
+                styles.inputWrapper, 
+                { 
+                  backgroundColor: Colors.inputBg, 
+                  borderColor: focusedField === 'pwd' ? Colors.primary : Colors.inputBorder,
+                  borderWidth: focusedField === 'pwd' ? 1.5 : 1
+                }
+              ]}>
+                <Ionicons name="lock-closed-outline" size={20} color={focusedField === 'pwd' ? Colors.primary : Colors.secondary} style={styles.inputIcon} />
+                <TextInput 
+                  style={[styles.input, { color: Colors.text }]} 
+                  placeholder="設定密碼 (至少6位)" 
+                  placeholderTextColor="#BDBDBD"
+                  secureTextEntry={!showPwd}
+                  value={password}
+                  onChangeText={setPassword}
+                  onFocus={() => setFocusedField('pwd')}
+                  onBlur={() => setFocusedField(null)}
+                />
+                <TouchableOpacity onPress={() => setShowPwd(!showPwd)}>
+                  <Ionicons name={showPwd ? "eye-outline" : "eye-off-outline"} size={22} color={Colors.secondary} />
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
 
             {/* 確認密碼 */}
-            <View style={[styles.inputWrapper, { backgroundColor: Colors.inputBg, borderColor: Colors.inputBorder }]}>
-              <Ionicons name="checkmark-circle-outline" size={20} color={Colors.secondary} style={styles.inputIcon} />
-              <TextInput 
-                style={[styles.input, { color: Colors.text }]} 
-                placeholder="確認新密碼" 
-                placeholderTextColor="#999"
-                secureTextEntry={!showConfirmPwd}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-              />
-              <TouchableOpacity onPress={() => setShowConfirmPwd(!showConfirmPwd)}>
-                <Ionicons name={showConfirmPwd ? "eye-outline" : "eye-off-outline"} size={22} color={Colors.secondary} />
-              </TouchableOpacity>
-            </View>
+            <Animated.View entering={FadeInUp.delay(600).duration(800)}>
+              <View style={[
+                styles.inputWrapper, 
+                { 
+                  backgroundColor: Colors.inputBg, 
+                  borderColor: focusedField === 'confirm' ? Colors.primary : Colors.inputBorder,
+                  borderWidth: focusedField === 'confirm' ? 1.5 : 1
+                }
+              ]}>
+                <Ionicons name="checkmark-circle-outline" size={20} color={focusedField === 'confirm' ? Colors.primary : Colors.secondary} style={styles.inputIcon} />
+                <TextInput 
+                  style={[styles.input, { color: Colors.text }]} 
+                  placeholder="確認新密碼" 
+                  placeholderTextColor="#BDBDBD"
+                  secureTextEntry={!showConfirmPwd}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  onFocus={() => setFocusedField('confirm')}
+                  onBlur={() => setFocusedField(null)}
+                />
+                <TouchableOpacity onPress={() => setShowConfirmPwd(!showConfirmPwd)}>
+                  <Ionicons name={showConfirmPwd ? "eye-outline" : "eye-off-outline"} size={22} color={Colors.secondary} />
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
           </View>
 
-          <TouchableOpacity style={styles.registerButton} onPress={handleRegister}>
-            <Text style={styles.buttonText}>註冊帳號</Text>
-          </TouchableOpacity>
+          {/* 註冊按鈕 */}
+          <Animated.View entering={FadeInUp.delay(800).duration(800)}>
+            <TouchableOpacity 
+              activeOpacity={0.9}
+              onPressIn={handlePressIn}
+              onPressOut={handlePressOut}
+              onPress={handleRegister}
+            >
+              <Animated.View style={[styles.registerButton, animatedButtonStyle]}>
+                <Text style={styles.buttonText}>註冊帳號</Text>
+                <Ionicons name="arrow-forward" size={20} color="white" style={{marginLeft: 8}} />
+              </Animated.View>
+            </TouchableOpacity>
+          </Animated.View>
 
-          <TouchableOpacity style={styles.footerLink} onPress={onNavigate}>
-            <Text style={[styles.footerText, { color: Colors.secondary }]}>
-              已經有帳號？ <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>點此登入</Text>
-            </Text>
-          </TouchableOpacity>
+          <Animated.View entering={FadeInUp.delay(1000).duration(800)} style={styles.footerLink}>
+            <TouchableOpacity onPress={onNavigate}>
+              <Text style={[styles.footerText, { color: Colors.secondary }]}>
+                已經有帳號？ <Text style={{ color: Colors.primary, fontWeight: 'bold' }}>點此登入</Text>
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -161,11 +236,11 @@ export default function Register({ onNavigate }: RegisterProps) {
         onRequestClose={() => setModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalView, { backgroundColor: Colors.modalBg }]}>
+          <Animated.View entering={FadeInUp} style={[styles.modalView, { backgroundColor: Colors.modalBg }]}>
             <View style={[styles.modalIconCircle, { backgroundColor: modalConfig.type === 'error' ? '#FFEDED' : modalConfig.type === 'success' ? '#EEF9F1' : '#F0F4FF' }]}>
               <Ionicons 
                 name={modalConfig.type === 'success' ? 'checkmark-circle' : modalConfig.type === 'error' ? 'close-circle' : 'information-circle'} 
-                size={40} 
+                size={44} 
                 color={modalConfig.type === 'success' ? '#4CAF50' : modalConfig.type === 'error' ? '#F44336' : Colors.primary} 
               />
             </View>
@@ -175,7 +250,6 @@ export default function Register({ onNavigate }: RegisterProps) {
               style={[styles.modalButton, { backgroundColor: Colors.primary }]}
               onPress={() => {
                 setModalVisible(false);
-                // 如果註冊成功，關閉彈窗後跳轉
                 if (modalConfig.type === 'success') onNavigate();
               }}
             >
@@ -183,7 +257,7 @@ export default function Register({ onNavigate }: RegisterProps) {
                 {modalConfig.type === 'success' ? '登入去' : '我知道了'}
               </Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
         </View>
       </Modal>
     </SafeAreaView>
@@ -191,96 +265,109 @@ export default function Register({ onNavigate }: RegisterProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, overflow: 'hidden' },
+  bgCircle: { position: 'absolute', width: 250, height: 250, borderRadius: 125 },
   scrollContent: { 
     paddingHorizontal: 30, 
-    paddingVertical: 60, 
+    paddingVertical: 40, 
     flexGrow: 1, 
     justifyContent: 'center' 
   },
   backButton: { 
-    position: 'absolute', 
-    top: 20, 
-    left: 20,
-    zIndex: 10 
+    marginBottom: 20,
+    alignSelf: 'flex-start'
   },
-  header: { marginBottom: 40, marginTop: 20 },
-  title: { fontSize: 32, fontFamily: 'ZenKurenaido' },
-  subtitle: { fontSize: 16, fontFamily: 'ZenKurenaido', marginTop: 10 },
+  backIconWrapper: {
+    padding: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  header: { marginBottom: 40 },
+  title: { fontSize: 36, fontFamily: 'ZenKurenaido', fontWeight: 'bold' },
+  subtitle: { fontSize: 16, fontFamily: 'ZenKurenaido', marginTop: 10, letterSpacing: 0.5 },
   inputContainer: { marginBottom: 20 },
   inputWrapper: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    borderWidth: 1, 
-    borderRadius: 15, 
+    borderRadius: 18, 
     paddingHorizontal: 15, 
     marginBottom: 15,
-    height: 60 
+    height: 62,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2
   },
-  inputIcon: { marginRight: 10 },
-  input: { flex: 1, fontFamily: 'ZenKurenaido', fontSize: 18 },
+  inputIcon: { marginRight: 12 },
+  input: { flex: 1, fontFamily: 'ZenKurenaido', fontSize: 17, fontWeight: '500' },
   registerButton: {
     backgroundColor: '#FF6F61',
     padding: 18,
-    borderRadius: 15,
+    borderRadius: 20,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     marginTop: 10,
-    elevation: 3,
+    elevation: 8,
     shadowColor: '#FF6F61',
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
-  buttonText: { color: '#fff', fontSize: 18, fontFamily: 'ZenKurenaido' },
-  footerLink: { marginTop: 25, alignItems: 'center' },
+  buttonText: { color: '#fff', fontSize: 18, fontFamily: 'ZenKurenaido', fontWeight: 'bold' },
+  footerLink: { marginTop: 30, alignItems: 'center' },
   footerText: { fontFamily: 'ZenKurenaido', fontSize: 16 },
 
   /* --- Modal 提示框樣式 --- */
   modalOverlay: { 
     flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.5)', 
+    backgroundColor: 'rgba(0,0,0,0.6)', 
     justifyContent: 'center', 
     alignItems: 'center' 
   },
   modalView: { 
-    width: '80%', 
-    borderRadius: 30, // 超圓潤圓角
-    padding: 25, 
+    width: '85%', 
+    borderRadius: 35, 
+    padding: 30, 
     alignItems: 'center', 
     shadowColor: '#000', 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.25, 
-    shadowRadius: 4, 
-    elevation: 5 
+    shadowOffset: { width: 0, height: 10 }, 
+    shadowOpacity: 0.3, 
+    shadowRadius: 20, 
+    elevation: 10 
   },
   modalIconCircle: { 
-    width: 70, 
-    height: 70, 
-    borderRadius: 35, 
+    width: 80, 
+    height: 80, 
+    borderRadius: 40, 
     justifyContent: 'center', 
     alignItems: 'center', 
-    marginBottom: 15 
+    marginBottom: 20 
   },
   modalTitle: { 
     fontSize: 24, 
     fontFamily: 'ZenKurenaido', 
-    marginBottom: 10 
+    fontWeight: 'bold',
+    marginBottom: 12 
   },
   modalMessage: { 
     fontSize: 16, 
     fontFamily: 'ZenKurenaido', 
     textAlign: 'center', 
-    marginBottom: 25, 
-    lineHeight: 22 
+    marginBottom: 30, 
+    lineHeight: 24 
   },
   modalButton: { 
     width: '100%', 
-    paddingVertical: 12, 
-    borderRadius: 20, 
+    paddingVertical: 14, 
+    borderRadius: 18, 
     alignItems: 'center' 
   },
   modalButtonText: { 
     color: 'white', 
     fontSize: 18, 
-    fontFamily: 'ZenKurenaido'
+    fontFamily: 'ZenKurenaido',
+    fontWeight: 'bold'
   }
 });
