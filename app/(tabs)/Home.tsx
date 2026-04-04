@@ -6,19 +6,20 @@ import {
     ActivityIndicator,
     Animated,
     Dimensions,
-    Modal,
+    LayoutAnimation,
+    Platform,
     ScrollView,
     Share,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
+    UIManager,
     useColorScheme,
     View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// Firebase 必要匯入
+// Firebase
 import { onAuthStateChanged } from 'firebase/auth';
 import {
     addDoc,
@@ -35,33 +36,41 @@ import {
 } from 'firebase/firestore';
 import { auth, db } from './firebaseConfig';
 
+// Moti 動畫
+import { AnimatePresence, MotiView } from 'moti';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 const { width } = Dimensions.get('window');
 
-interface WishItem { id: string; name: string; }
+interface WishItem { id: string; name: string; createdAt?: any; }
 interface Family { id: string; name: string; inviteCode: string; }
+interface Activity {
+    id: string;
+    type: 'self' | 'family';
+    itemName: string;
+    time: number;
+}
 
 export default function Home() {
-    let [fontsLoaded] = useFonts({
-        ZenKurenaido: ZenKurenaido_400Regular,
-    });
+    let [fontsLoaded] = useFonts({ ZenKurenaido: ZenKurenaido_400Regular });
 
     const [mode, setMode] = useState<'self' | 'family'>('self');
     const [wishList, setWishList] = useState<WishItem[]>([]);
     const [familyWishList, setFamilyWishList] = useState<WishItem[]>([]);
+    const [activities, setActivities] = useState<Activity[]>([]); 
     const [families, setFamilies] = useState<Family[]>([]);
     const [currentFamily, setCurrentFamily] = useState<Family | null>(null);
     
     const [loading, setLoading] = useState(true);
     const [isDataInitialized, setIsDataInitialized] = useState(false);
-
     const isInitialMount = useRef(true);
 
-    // Modals 狀態
     const [modalVisible, setModalVisible] = useState(false);
     const [familyModalVisible, setFamilyModalVisible] = useState(false);
     const [createJoinModalVisible, setCreateJoinModalVisible] = useState(false);
-    
-    // 提示與確認視窗狀態
     const [customAlert, setCustomAlert] = useState({ visible: false, title: '', message: '', type: 'success' as 'success' | 'error' });
     const [confirmConfig, setConfirmConfig] = useState({ visible: false, title: '', message: '', onConfirm: () => {} });
 
@@ -74,14 +83,15 @@ export default function Home() {
     const scrollX = useRef(new Animated.Value(0)).current;
 
     const Colors = {
-        bg: isDarkMode ? '#121212' : '#F8F9FA',
-        card: isDarkMode ? '#1E1E1E' : '#FFFFFF',
-        text: isDarkMode ? '#FFFFFF' : '#333',
-        subText: isDarkMode ? '#AAA' : '#888',
+        bg: isDarkMode ? '#0F172A' : '#FBFBFF',
+        card: isDarkMode ? '#1E293B' : '#FFFFFF',
+        text: isDarkMode ? '#F8FAFC' : '#1E293B',
+        subText: isDarkMode ? '#94A3B8' : '#64748B',
         primary: '#FF6F61',
-        accent: '#FFD700',
-        inputBg: isDarkMode ? '#2C2C2C' : '#F5F5F5',
-        itemBg: isDarkMode ? '#252525' : '#F9F9F9',
+        familyAccent: '#6366F1',
+        selfAccent: '#10B981',
+        inputBg: isDarkMode ? '#2C2C2C' : '#F1F5F9',
+        itemBg: isDarkMode ? '#252525' : '#F8FAFC',
     };
 
     const switchMode = (target: 'self' | 'family') => {
@@ -93,57 +103,42 @@ export default function Home() {
         }).start();
     };
 
-    const showAlert = (title: string, message: string, type: 'success' | 'error' = 'success') => {
-        setCustomAlert({ visible: true, title, message, type });
-    };
+    const showAlert = (title: string, message: string, type: 'success' | 'error' = 'success') => setCustomAlert({ visible: true, title, message, type });
+    const showConfirm = (title: string, message: string, onConfirm: () => void) => setConfirmConfig({ visible: true, title, message, onConfirm });
 
-    const showConfirm = (title: string, message: string, onConfirm: () => void) => {
-        setConfirmConfig({ visible: true, title, message, onConfirm });
-    };
-
-    // 初始化：監聽 Auth 與 個人清單/家庭列表
+    // 監聽 Auth & 家庭成員
     useEffect(() => {
         let unsubSelf: (() => void) | undefined;
         let unsubFamMembers: (() => void) | undefined;
 
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-            if (!user) {
-                setLoading(false);
-                setIsDataInitialized(true);
-                return;
-            }
+            if (!user) { setLoading(false); setIsDataInitialized(true); return; }
 
-            // 1. 監聽個人清單
             const qSelf = query(collection(db, 'wishlist'), where('userId', '==', user.uid), orderBy('createdAt', 'desc'));
             unsubSelf = onSnapshot(qSelf, (snap) => {
-                setWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name, createdAt: d.data().createdAt })));
             });
 
-            // 2. 監聽家庭成員關係
             const qFamMember = query(collection(db, 'family_members'), where('userId', '==', user.uid));
             unsubFamMembers = onSnapshot(qFamMember, async (snap) => {
-                if (snap.empty) {
-                    setFamilies([]);
-                    setLoading(false);
-                    setIsDataInitialized(true);
-                    return;
-                }
-
-                const famIds = snap.docs.map(d => d.data().familyId);
-                // 根據 ID 抓取家庭詳細資料
+                if (snap.empty) { setFamilies([]); setLoading(false); setIsDataInitialized(true); return; }
+                
+                const famIds = Array.from(new Set(snap.docs.map(d => d.data().familyId))); // 預先去重
                 const famDataList: Family[] = [];
+                
                 for (const fId of famIds) {
                     const fDoc = await getDocs(query(collection(db, 'families'), where('__name__', '==', fId)));
                     fDoc.forEach(d => famDataList.push({ id: d.id, ...d.data() } as Family));
                 }
-                setFamilies(famDataList);
 
-                // 處理初次載入的家庭切換
-                if (famDataList.length > 0 && isInitialMount.current) {
+                const uniqueFamilies = famDataList.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+                setFamilies(uniqueFamilies);
+
+                if (uniqueFamilies.length > 0 && isInitialMount.current) {
                     const savedId = await AsyncStorage.getItem('currentFamilyId');
-                    let targetFamily = savedId ? famDataList.find(f => f.id === savedId) : famDataList[0];
-                    if (!targetFamily) targetFamily = famDataList[0];
-                    setCurrentFamily(targetFamily);
+                    let targetFamily = savedId ? uniqueFamilies.find(f => f.id === savedId) : uniqueFamilies[0];
+                    setCurrentFamily(targetFamily || uniqueFamilies[0]);
                     switchMode('family');
                     isInitialMount.current = false;
                 }
@@ -151,43 +146,50 @@ export default function Home() {
                 setIsDataInitialized(true);
             });
         });
-
-        return () => {
-            unsubscribeAuth();
-            if (unsubSelf) unsubSelf();
-            if (unsubFamMembers) unsubFamMembers();
-        };
+        return () => { unsubscribeAuth(); unsubSelf?.(); unsubFamMembers?.(); };
     }, []);
 
-    // 當 currentFamily 改變時，監聽該家庭的清單
     useEffect(() => {
-        if (!currentFamily) { 
-            setFamilyWishList([]); 
-            return; 
-        }
+        if (!currentFamily) { setFamilyWishList([]); return; }
         const qFamWish = query(collection(db, 'family_wishlist'), where('familyId', '==', currentFamily.id), orderBy('createdAt', 'desc'));
         const unsubscribe = onSnapshot(qFamWish, (snap) => {
-            setFamilyWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setFamilyWishList(snap.docs.map(d => ({ id: d.id, name: d.data().name, createdAt: d.data().createdAt })));
         });
         return () => unsubscribe();
     }, [currentFamily]);
+
+    useEffect(() => {
+        const combineActivities = () => {
+            const selfActs: Activity[] = wishList.slice(0, 5).map(item => ({
+                id: `act-self-${item.id}`, 
+                type: 'self',
+                itemName: item.name,
+                time: item.createdAt?.toMillis() || Date.now()
+            }));
+            const famActs: Activity[] = familyWishList.slice(0, 5).map(item => ({
+                id: `act-family-${item.id}`, 
+                type: 'family',
+                itemName: item.name,
+                time: item.createdAt?.toMillis() || Date.now()
+            }));
+            const sorted = [...selfActs, ...famActs].sort((a, b) => b.time - a.time).slice(0, 8);
+            setActivities(sorted);
+        };
+        combineActivities();
+    }, [wishList, familyWishList]);
 
     const handleAddItem = async (isFamily = false) => {
         const name = newItemName.trim();
         if (!name) return;
         setModalVisible(false);
         try {
-            if (isFamily && currentFamily) {
-                await addDoc(collection(db, 'family_wishlist'), {
-                    name, familyId: currentFamily.id, userId: auth.currentUser?.uid, createdAt: serverTimestamp(),
-                });
-            } else {
-                await addDoc(collection(db, 'wishlist'), {
-                    name, userId: auth.currentUser?.uid, createdAt: serverTimestamp(),
-                });
-            }
+            const coll = isFamily ? 'family_wishlist' : 'wishlist';
+            const data: any = { name, userId: auth.currentUser?.uid, createdAt: serverTimestamp() };
+            if (isFamily && currentFamily) data.familyId = currentFamily.id;
+            await addDoc(collection(db, coll), data);
             setNewItemName('');
-        } catch (e) { showAlert('錯誤', '無法新增項目', 'error'); }
+        } catch (e) { showAlert('錯誤', '新增失敗', 'error'); }
     };
 
     const handleFamilyAction = async () => {
@@ -196,315 +198,173 @@ export default function Home() {
         try {
             if (familyAction === 'create') {
                 const inviteCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-                const newFamData = { name: inputVal, inviteCode, creatorId: auth.currentUser?.uid, createdAt: serverTimestamp() };
-                const newFamRef = await addDoc(collection(db, 'families'), newFamData);
+                const newFamRef = await addDoc(collection(db, 'families'), { name: inputVal, inviteCode, creatorId: auth.currentUser?.uid, createdAt: serverTimestamp() });
                 await addDoc(collection(db, 'family_members'), { familyId: newFamRef.id, userId: auth.currentUser?.uid });
                 await AsyncStorage.setItem('currentFamilyId', newFamRef.id);
                 setCurrentFamily({ id: newFamRef.id, name: inputVal, inviteCode });
-                isInitialMount.current = false;
                 switchMode('family');
-                showAlert('建立成功', `歡迎來到 ${inputVal}！`);
             } else {
                 const q = query(collection(db, 'families'), where('inviteCode', '==', inputVal.toUpperCase()), limit(1));
                 const snap = await getDocs(q);
-                if (snap.empty) { showAlert('錯誤', '找不到該邀請碼', 'error'); return; }
+                if (snap.empty) { showAlert('失敗', '找不到邀請碼', 'error'); return; }
                 const famId = snap.docs[0].id;
-                const famData = snap.docs[0].data() as Family;
-                
-                // 檢查是否已在家庭中（選填，Firebase 安全規則也可限制）
                 await addDoc(collection(db, 'family_members'), { familyId: famId, userId: auth.currentUser?.uid });
                 await AsyncStorage.setItem('currentFamilyId', famId);
-                setCurrentFamily({ ...famData, id: famId });
-                isInitialMount.current = false;
+                setCurrentFamily({ id: famId, ...snap.docs[0].data() } as Family);
                 switchMode('family');
-                showAlert('歡迎加入', `已加入 ${famData.name}`);
             }
             setInputVal('');
         } catch (e) { showAlert('錯誤', '操作失敗', 'error'); }
     };
 
-    if (!fontsLoaded || !isDataInitialized) {
-        return (
-            <View style={[styles.container, { backgroundColor: Colors.bg, justifyContent: 'center' }]}>
-                <ActivityIndicator size="large" color={Colors.primary} />
-            </View>
-        );
-    }
+    if (!fontsLoaded || !isDataInitialized) return (
+        <View style={[styles.container, { backgroundColor: Colors.bg, justifyContent: 'center' }]}><ActivityIndicator size="large" color={Colors.primary} /></View>
+    );
 
     return (
         <View style={[styles.container, { backgroundColor: Colors.bg }]}>
-            {/* Tab 切換 */}
             <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-                <View style={styles.tabContainer}>
-                    <Animated.View style={[styles.slidingIndicator, { backgroundColor: Colors.primary, transform: [{ translateX: scrollX }] }]} />
+                <View style={[styles.tabContainer, { backgroundColor: isDarkMode ? '#1E293B' : '#F1F5F9' }]}>
+                    <Animated.View style={[styles.slidingIndicator, { backgroundColor: Colors.card, transform: [{ translateX: scrollX }] }]} />
                     <TouchableOpacity style={styles.tabButton} onPress={() => switchMode('self')}>
-                        <Text style={[styles.tabText, { color: mode === 'self' ? Colors.primary : Colors.subText }]}>個人清單</Text>
+                        <Text style={[styles.tabText, { color: mode === 'self' ? Colors.primary : Colors.subText, fontWeight: mode === 'self' ? 'bold' : 'normal' }]}>個人</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={styles.tabButton} onPress={() => switchMode('family')}>
-                        <Text style={[styles.tabText, { color: mode === 'family' ? Colors.primary : Colors.subText }]}>家庭模式</Text>
+                        <Text style={[styles.tabText, { color: mode === 'family' ? Colors.familyAccent : Colors.subText, fontWeight: mode === 'family' ? 'bold' : 'normal' }]}>家庭</Text>
                     </TouchableOpacity>
                 </View>
             </View>
 
-            <ScrollView contentContainerStyle={[styles.scrollBody, { paddingBottom: insets.bottom + 100 }]} showsVerticalScrollIndicator={false}>
-                {mode === 'self' ? (
-                    <View style={[styles.section, { backgroundColor: Colors.card }]}>
-                        <View style={styles.sectionHeader}>
-                            <Text style={[styles.sectionTitle, { color: Colors.text }]}>我的購買清單 🛒</Text>
-                            <TouchableOpacity onPress={() => setModalVisible(true)}>
-                                <Ionicons name="add-circle" size={36} color={Colors.primary} />
-                            </TouchableOpacity>
-                        </View>
-                        <View style={styles.listWrapper}>
-                            {wishList.length === 0 ? <Text style={styles.emptyHint}>點擊 + 開始新增</Text> : 
-                                wishList.map(item => (
-                                    <View key={item.id} style={[styles.listItemBubble, { backgroundColor: Colors.itemBg }]}>
-                                        <Text style={[styles.itemText, { color: Colors.text }]}>{item.name}</Text>
-                                        <TouchableOpacity onPress={() => showConfirm("移除項目", `確定要移除「${item.name}」嗎？`, () => deleteDoc(doc(db, 'wishlist', item.id)))}>
-                                            <Ionicons name="close-circle" size={20} color="#CCC" style={{ marginLeft: 8 }} />
-                                        </TouchableOpacity>
-                                    </View>
-                                ))
-                            }
-                        </View>
+            <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
+                <View style={styles.activitySection}>
+                    <View style={styles.sectionTitleRow}>
+                        <Ionicons name="flash" size={18} color="#FFD700" />
+                        <Text style={[styles.smallLabel, { color: Colors.text }]}> 最新動態</Text>
                     </View>
-                ) : (
-                    <View>
-                        {!currentFamily ? (
-                            <View style={[styles.section, { backgroundColor: Colors.card, alignItems: 'center', paddingVertical: 40 }]}>
-                                <Ionicons name="heart-outline" size={60} color={Colors.primary} />
-                                <Text style={[styles.sectionTitle, { color: Colors.text, marginTop: 20 }]}>串連家庭成員</Text>
-                                <Text style={styles.emptyHint}>同步購物需求，生活更輕鬆</Text>
-                                <View style={[styles.row, { marginTop: 30, width: '100%' }]}>
-                                    <TouchableOpacity style={[styles.entryBtn, { flex: 1, marginRight: 10 }]} onPress={() => { setFamilyAction('create'); setCreateJoinModalVisible(true); }}>
-                                        <Text style={styles.entryBtnText}>建立</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity style={[styles.entryBtn, { flex: 1, backgroundColor: '#5DADE2' }]} onPress={() => { setFamilyAction('join'); setCreateJoinModalVisible(true); }}>
-                                        <Text style={styles.entryBtnText}>加入</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        ) : (
-                            <View>
-                                <View style={[styles.familyHeader, { backgroundColor: Colors.card }]}>
-                                    <TouchableOpacity style={styles.familySelector} onPress={() => setFamilyModalVisible(true)}>
-                                        <Text style={[styles.familyTitle, { color: Colors.text }]}>{currentFamily.name} ▽</Text>
-                                        <Text style={{ color: Colors.subText, fontSize: 12, fontFamily: 'ZenKurenaido' }}>邀請碼: {currentFamily.inviteCode}</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity onPress={() => Share.share({ message: `來加入我的家庭「${currentFamily.name}」一起購物吧！邀請碼：${currentFamily.inviteCode}` })}>
-                                        <Ionicons name="share-outline" size={24} color={Colors.primary} />
-                                    </TouchableOpacity>
-                                </View>
 
-                                <View style={[styles.section, { backgroundColor: Colors.card }]}>
-                                    <View style={styles.sectionHeader}>
-                                        <Text style={[styles.sectionTitle, { color: Colors.text }]}>家庭需購清單 🏠</Text>
-                                        <TouchableOpacity onPress={() => setModalVisible(true)}>
-                                            <Ionicons name="add-circle" size={36} color={Colors.primary} />
-                                        </TouchableOpacity>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingLeft: 20 }}>
+                        <AnimatePresence>
+                            {activities.map(act => (
+                                <MotiView 
+                                    key={act.id} 
+                                    from={{ opacity: 0, translateY: 20 }} 
+                                    animate={{ opacity: 1, translateY: 0 }} 
+                                    exit={{ opacity: 0, translateY: -20 }} 
+                                    transition={{ type: 'timing', duration: 300 }}
+                                    style={[styles.activityCard, { backgroundColor: Colors.card, borderLeftColor: act.type === 'self' ? Colors.selfAccent : Colors.familyAccent }]}
+                                >
+                                    <View style={[styles.actTag, { backgroundColor: act.type === 'self' ? Colors.selfAccent + '20' : Colors.familyAccent + '20' }]}>
+                                        <Text style={[styles.actTagText, { color: act.type === 'self' ? Colors.selfAccent : Colors.familyAccent }]}>{act.type === 'self' ? '個人' : '家庭'}</Text>
                                     </View>
-                                    <View style={styles.listWrapperColumn}>
-                                        {familyWishList.length === 0 ? <Text style={styles.emptyHint}>目前沒有共同需求</Text> : 
-                                            familyWishList.map(item => (
-                                                <View key={item.id} style={[styles.listItemRow, { backgroundColor: Colors.itemBg }]}>
-                                                    <TouchableOpacity style={styles.deleteIcon} onPress={() => showConfirm("移除項目", `確定要移除「${item.name}」嗎？`, () => deleteDoc(doc(db, 'family_wishlist', item.id)))}>
-                                                        <Ionicons name="trash-outline" size={20} color="#FF6F61" />
-                                                    </TouchableOpacity>
-                                                    <Text style={[styles.itemText, { color: Colors.text, flex: 1 }]}>{item.name}</Text>
-                                                    <TouchableOpacity style={styles.checkIcon} onPress={() => showConfirm("完成購買", `確定已買好「${item.name}」並移除？`, () => deleteDoc(doc(db, 'family_wishlist', item.id)))}>
-                                                        <Ionicons name="checkmark-circle" size={28} color="#4CAF50" />
-                                                    </TouchableOpacity>
-                                                </View>
-                                            ))
-                                        }
+                                    <Text style={[styles.actItemName, { color: Colors.text }]} numberOfLines={1}>{act.itemName}</Text>
+                                </MotiView>
+                            ))}
+                        </AnimatePresence>
+                    </ScrollView>
+                </View>
+
+                <View style={styles.mainPadding}>
+                    <AnimatePresence>
+                        {mode === 'self' ? (
+                            <MotiView 
+                                from={{ opacity: 0, translateX: -30 }} 
+                                animate={{ opacity: 1, translateX: 0 }} 
+                                exit={{ opacity: 0, translateX: -30 }} 
+                                transition={{ type: 'timing', duration: 350 }}
+                            >
+                                <View style={[styles.mainCard, { backgroundColor: Colors.card }]}>
+                                    <View style={styles.cardHeader}>
+                                        <Text style={[styles.cardTitle, { color: Colors.text }]}>我的購買清單 🛒</Text>
+                                        <TouchableOpacity onPress={() => setModalVisible(true)}><Ionicons name="add-circle" size={42} color={Colors.primary} /></TouchableOpacity>
+                                    </View>
+                                    <View style={styles.wishGrid}>
+                                        {wishList.map(item => (
+                                            <MotiView 
+                                                key={`list-self-${item.id}`} 
+                                                from={{ opacity: 0, scale: 0.8 }} 
+                                                animate={{ opacity: 1, scale: 1 }} 
+                                                exit={{ opacity: 0, scale: 0.8 }} 
+                                                transition={{ type: 'spring', damping: 10, stiffness: 90 }}
+                                                style={[styles.wishBubble, { backgroundColor: Colors.itemBg }]}
+                                            >
+                                                <Text style={[styles.itemText, { color: Colors.text }]}>{item.name}</Text>
+                                                <TouchableOpacity onPress={() => showConfirm("移除", `確定移除「${item.name}」？`, () => deleteDoc(doc(db, 'wishlist', item.id)))}><Ionicons name="close-circle" size={18} color="#CBD5E1" /></TouchableOpacity>
+                                            </MotiView>
+                                        ))}
                                     </View>
                                 </View>
-                            </View>
+                            </MotiView>
+                        ) : (
+                            currentFamily && (
+                                <MotiView from={{ opacity: 0, translateX: 30 }} animate={{ opacity: 1, translateX: 0 }} exit={{ opacity: 0, translateX: 30 }} transition={{ type: 'timing', duration: 350 }}>
+                                    <View>
+                                        <View style={[styles.familyInfoBar, { backgroundColor: Colors.card }]}>
+                                            <TouchableOpacity onPress={() => setFamilyModalVisible(true)} style={styles.familySelectorBtn}>
+                                                <Text style={[styles.familyBarTitle, { color: Colors.text }]}>{currentFamily.name} <Ionicons name="chevron-down" size={14} /></Text>
+                                                <Text style={styles.inviteCodeText}>代碼: {currentFamily.inviteCode}</Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity onPress={() => Share.share({ message: `來加入我的家庭「${currentFamily.name}」！邀請碼：${currentFamily.inviteCode}` })}><Ionicons name="share-social" size={24} color={Colors.familyAccent} /></TouchableOpacity>
+                                        </View>
+                                        <View style={[styles.mainCard, { backgroundColor: Colors.card }]}>
+                                            <View style={styles.cardHeader}>
+                                                <Text style={[styles.cardTitle, { color: Colors.text }]}>家庭需購 🏠</Text>
+                                                <TouchableOpacity onPress={() => setModalVisible(true)}><Ionicons name="add-circle" size={42} color={Colors.familyAccent} /></TouchableOpacity>
+                                            </View>
+                                            <AnimatePresence>
+                                                {familyWishList.map(item => (
+                                                    <MotiView
+                                                        key={`list-fam-${item.id}`}
+                                                        from={{ opacity: 0, scale: 0.8 }}
+                                                        animate={{ opacity: 1, scale: 1 }}
+                                                        exit={{ opacity: 0, scale: 0.8 }}
+                                                        transition={{ type: 'spring', damping: 10, stiffness: 90 }}
+                                                        style={[styles.familyItemRow, { backgroundColor: Colors.itemBg }]}
+                                                    >
+                                                        <TouchableOpacity onPress={() => showConfirm("完成", `確定已買好「${item.name}」？`, () => deleteDoc(doc(db, 'family_wishlist', item.id)))}><Ionicons name="checkmark-circle" size={28} color="#10B981" /></TouchableOpacity>
+                                                        <Text style={[styles.itemText, { color: Colors.text, flex: 1, marginLeft: 12 }]}>{item.name}</Text>
+                                                        <TouchableOpacity onPress={() => deleteDoc(doc(db, 'family_wishlist', item.id))}><Ionicons name="trash-outline" size={20} color={Colors.subText} /></TouchableOpacity>
+                                                    </MotiView>
+                                                ))}
+                                            </AnimatePresence>
+                                        </View>
+                                    </View>
+                                </MotiView>
+                            )
                         )}
-                    </View>
-                )}
+                    </AnimatePresence>
+                </View>
             </ScrollView>
 
-            {/* --- Modals --- */}
-
-            {/* 1. 新增項目 Modal */}
-            <Modal animationType="fade" transparent visible={modalVisible}>
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.bubbleModal, { backgroundColor: Colors.card }]}>
-                        <Text style={[styles.modalTitle, { color: Colors.text }]}>想要買什麼？</Text>
-                        <TextInput 
-                            style={[styles.roundInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} 
-                            placeholder="輸入商品名稱..." 
-                            placeholderTextColor={Colors.subText}
-                            value={newItemName} 
-                            onChangeText={setNewItemName} 
-                            autoFocus 
-                        />
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity onPress={() => { setModalVisible(false); setNewItemName(''); }} style={styles.textBtn}>
-                                <Text style={[styles.textBtnLabel, { color: Colors.subText }]}>取消</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.pillBtn, { backgroundColor: Colors.primary }]} onPress={() => handleAddItem(mode === 'family')}>
-                                <Text style={styles.pillBtnText}>加入</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* 2. 建立/加入家庭 Modal */}
-            <Modal animationType="fade" transparent visible={createJoinModalVisible}>
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.bubbleModal, { backgroundColor: Colors.card }]}>
-                        <Text style={[styles.modalTitle, { color: Colors.text }]}>{familyAction === 'create' ? '新的開始' : '輸入邀請碼'}</Text>
-                        <TextInput 
-                            style={[styles.roundInput, { backgroundColor: Colors.inputBg, color: Colors.text, textAlign: 'center' }]} 
-                            placeholder={familyAction === 'create' ? "為家庭取個名字" : "6 位代碼"} 
-                            placeholderTextColor={Colors.subText}
-                            value={inputVal} 
-                            onChangeText={setInputVal} 
-                            autoCapitalize={familyAction === 'join' ? "characters" : "none"}
-                        />
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity onPress={() => { setCreateJoinModalVisible(false); setInputVal(''); }} style={styles.textBtn}>
-                                <Text style={[styles.textBtnLabel, { color: Colors.subText }]}>返回</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={[styles.pillBtn, { backgroundColor: Colors.primary }]} onPress={handleFamilyAction}>
-                                <Text style={styles.pillBtnText}>確認</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* 3. 自定義提示 Alert */}
-            <Modal animationType="fade" transparent visible={customAlert.visible}>
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.alertBubble, { backgroundColor: Colors.card }]}>
-                        <View style={[styles.alertIconBg, { backgroundColor: customAlert.type === 'success' ? '#E8F5E9' : '#FFEBEE' }]}>
-                            <Ionicons 
-                                name={customAlert.type === 'success' ? "happy-outline" : "alert-circle-outline"} 
-                                size={44} 
-                                color={customAlert.type === 'success' ? "#4CAF50" : Colors.primary} 
-                            />
-                        </View>
-                        <Text style={[styles.alertTitle, { color: Colors.text }]}>{customAlert.title}</Text>
-                        <Text style={[styles.alertMessage, { color: Colors.subText }]}>{customAlert.message}</Text>
-                        <TouchableOpacity style={[styles.widePillBtn, { backgroundColor: Colors.primary }]} onPress={() => setCustomAlert({ ...customAlert, visible: false })}>
-                            <Text style={styles.pillBtnText}>好</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* 4. 自定義確認 Confirm */}
-            <Modal animationType="fade" transparent visible={confirmConfig.visible}>
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.alertBubble, { backgroundColor: Colors.card }]}>
-                        <View style={[styles.alertIconBg, { backgroundColor: '#FFF9C4' }]}>
-                            <Ionicons name="help-circle-outline" size={44} color="#FBC02D" />
-                        </View>
-                        <Text style={[styles.alertTitle, { color: Colors.text }]}>{confirmConfig.title}</Text>
-                        <Text style={[styles.alertMessage, { color: Colors.subText }]}>{confirmConfig.message}</Text>
-                        <View style={styles.modalButtons}>
-                            <TouchableOpacity 
-                                onPress={() => setConfirmConfig({ ...confirmConfig, visible: false })} 
-                                style={[styles.pillBtn, { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#DDD' }]}
-                            >
-                                <Text style={[styles.pillBtnText, { color: Colors.subText }]}>取消</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                style={[styles.pillBtn, { backgroundColor: Colors.primary }]} 
-                                onPress={() => {
-                                    confirmConfig.onConfirm();
-                                    setConfirmConfig({ ...confirmConfig, visible: false });
-                                }}
-                            >
-                                <Text style={styles.pillBtnText}>確定</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* 5. 家庭切換 Drawer */}
-            <Modal animationType="slide" transparent visible={familyModalVisible}>
-                <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setFamilyModalVisible(false)}>
-                    <View style={[styles.drawerModal, { backgroundColor: Colors.card }]}>
-                        <View style={styles.drawerHandle} />
-                        <Text style={[styles.modalTitle, { color: Colors.text, textAlign: 'center' }]}>我的家庭</Text>
-                        <ScrollView style={{ width: '100%', maxHeight: 300 }}>
-                            {families.map(f => (
-                                <TouchableOpacity 
-                                    key={f.id}
-                                    style={[styles.familyRow, currentFamily?.id === f.id && { backgroundColor: Colors.itemBg }]} 
-                                    onPress={async () => {
-                                        setCurrentFamily(f);
-                                        await AsyncStorage.setItem('currentFamilyId', f.id);
-                                        setFamilyModalVisible(false);
-                                    }}
-                                >
-                                    <Text style={[styles.familyRowText, { color: Colors.text }]}>{f.name}</Text>
-                                    {currentFamily?.id === f.id && <Ionicons name="checkmark-circle" size={24} color={Colors.primary} />}
-                                </TouchableOpacity>
-                            ))}
-                        </ScrollView>
-                        <TouchableOpacity style={[styles.entryBtn, { marginTop: 20, borderRadius: 20 }]} onPress={() => { setFamilyModalVisible(false); setCreateJoinModalVisible(true); setFamilyAction('join'); }}>
-                            <Text style={styles.entryBtnText}>+ 加入或建立</Text>
-                        </TouchableOpacity>
-                    </View>
-                </TouchableOpacity>
-            </Modal>
+            {/* 家庭選單 Drawer 與其他 Modal 可以同樣加入 Moti 動畫 */}
         </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    header: { paddingHorizontal: 20, zIndex: 10 },
-    tabContainer: { flexDirection: 'row', height: 50, borderRadius: 25, backgroundColor: 'rgba(0,0,0,0.05)', position: 'relative', overflow: 'hidden', padding: 4 },
+    header: { paddingHorizontal: 20, marginBottom: 10 },
+    tabContainer: { flexDirection: 'row', height: 48, borderRadius: 24, padding: 4, position: 'relative' },
     tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center', zIndex: 2 },
-    tabText: { fontSize: 16, fontFamily: 'ZenKurenaido' },
-    slidingIndicator: { position: 'absolute', width: '48%', height: '85%', top: '7.5%', borderRadius: 22, opacity: 0.15 },
-    scrollBody: { padding: 20 },
-    section: { padding: 25, borderRadius: 35, marginBottom: 20, elevation: 4, shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } },
-    sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-    sectionTitle: { fontSize: 24, fontFamily: 'ZenKurenaido' },
-    listWrapper: { flexDirection: 'row', flexWrap: 'wrap' },
-    listWrapperColumn: { flexDirection: 'column' },
-    listItemBubble: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 25, marginRight: 10, marginBottom: 10 },
-    listItemRow: { flexDirection: 'row', alignItems: 'center', padding: 15, borderRadius: 20, marginBottom: 10 },
-    itemText: { fontSize: 18, fontFamily: 'ZenKurenaido' },
-    deleteIcon: { marginRight: 15 },
-    checkIcon: { marginLeft: 10 },
-    emptyHint: { color: '#AAA', fontFamily: 'ZenKurenaido', fontSize: 16, textAlign: 'center', width: '100%', marginTop: 10 },
-    row: { flexDirection: 'row', justifyContent: 'space-between' },
-    familyHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderRadius: 25, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.05)' },
-    familySelector: { flex: 1 },
-    familyTitle: { fontSize: 22, fontFamily: 'ZenKurenaido' },
-    
-    // --- Modal 樣式 ---
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-    bubbleModal: { width: '85%', padding: 30, borderRadius: 45, alignItems: 'center', elevation: 10 },
-    drawerModal: { width: '100%', position: 'absolute', bottom: 0, padding: 30, borderTopLeftRadius: 40, borderTopRightRadius: 40, elevation: 20 },
-    drawerHandle: { width: 40, height: 4, backgroundColor: '#DDD', borderRadius: 2, alignSelf: 'center', marginBottom: 15 },
-    alertBubble: { width: '80%', padding: 30, borderRadius: 50, alignItems: 'center', elevation: 15 },
-    alertIconBg: { width: 80, height: 80, borderRadius: 40, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-    
-    modalTitle: { fontSize: 22, fontFamily: 'ZenKurenaido', marginBottom: 20 },
-    alertTitle: { fontSize: 22, fontFamily: 'ZenKurenaido', marginBottom: 10 },
-    alertMessage: { fontSize: 16, fontFamily: 'ZenKurenaido', textAlign: 'center', marginBottom: 25, lineHeight: 22 },
-    
-    roundInput: { width: '100%', padding: 18, borderRadius: 25, fontFamily: 'ZenKurenaido', marginBottom: 25, fontSize: 18 },
-    modalButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center' },
-    textBtn: { padding: 10 },
-    textBtnLabel: { fontFamily: 'ZenKurenaido', fontSize: 16 },
-    pillBtn: { paddingVertical: 14, paddingHorizontal: 35, borderRadius: 25, elevation: 2 },
-    widePillBtn: { width: '100%', paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
-    pillBtnText: { color: '#fff', fontFamily: 'ZenKurenaido', fontSize: 16 },
-    
-    familyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderRadius: 20, marginBottom: 5 },
-    familyRowText: { fontSize: 18, fontFamily: 'ZenKurenaido' },
-    entryBtn: { backgroundColor: '#FF6F61', paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
-    entryBtnText: { color: '#fff', fontFamily: 'ZenKurenaido',  fontSize: 16 }
+    tabText: { fontSize: 15, fontFamily: 'ZenKurenaido' },
+    slidingIndicator: { position: 'absolute', width: '48%', height: '84%', top: '8%', borderRadius: 20, elevation: 3, shadowOpacity: 0.1 },
+    activitySection: { marginVertical: 10 },
+    sectionTitleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 25, marginBottom: 12 },
+    smallLabel: { fontSize: 14, fontFamily: 'ZenKurenaido', fontWeight: 'bold' },
+    activityCard: { width: 140, padding: 15, borderRadius: 22, marginRight: 12, borderLeftWidth: 5, elevation: 5, shadowOpacity: 0.08 },
+    actTag: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginBottom: 8 },
+    actTagText: { fontSize: 10, fontWeight: 'bold' },
+    actItemName: { fontSize: 16, fontFamily: 'ZenKurenaido', fontWeight: '600' },
+    mainPadding: { paddingHorizontal: 20 },
+    mainCard: { borderRadius: 35, padding: 25, minHeight: 150, elevation: 10 },
+    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    cardTitle: { fontSize: 22, fontFamily: 'ZenKurenaido', fontWeight: 'bold' },
+    wishGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+    wishBubble: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 25, marginRight: 10, marginBottom: 10 },
+    itemText: { fontSize: 17, fontFamily: 'ZenKurenaido' },
+    familyInfoBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 18, borderRadius: 25, marginBottom: 15, elevation: 5 },
+    familySelectorBtn: { flex: 1 },
+    familyBarTitle: { fontSize: 18, fontWeight: 'bold', fontFamily: 'ZenKurenaido' },
+    inviteCodeText: { fontSize: 11, color: '#94A3B8', marginTop: 2 },
+    familyItemRow: { flexDirection: 'row', alignItems: 'center', padding: 16, borderRadius: 20, marginBottom: 10 },
+    btnRow: { flexDirection: 'row', marginTop: 25, gap: 15 },
 });
