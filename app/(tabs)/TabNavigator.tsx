@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { BlurView } from 'expo-blur';
 import React from 'react';
-import { Platform, useColorScheme } from 'react-native';
+import { Platform, useColorScheme, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-// 導入各個頁面
+// pages
 import Family from './Family';
 import Home from './Home';
 import Report from './Report';
@@ -21,53 +22,80 @@ export default function TabNavigator() {
   const activeColor = '#FF6F61';
   const inactiveColor = isDarkMode ? '#888' : '#AAA';
 
-  /**
-   * Android 深度高度補修：
-   * 從截圖看，你的 Android 系統列大約佔了 48dp 左右。
-   * 如果 insets.bottom <= 0，代表系統沒有給予安全區，我們必須手動「暴力」推高。
-   */
   const isAndroid = Platform.OS === 'android';
-  
-  // 如果 Android 回傳 0，我們直接墊 35 像素；如果有回傳（手勢模式），我們多給 10 像素。
-  const androidBottomPadding = insets.bottom > 0 ? insets.bottom + 10 : 35;
-  
-  // 總高度調整：Android 建議拉到 95 甚至 100，確保圖示不會被導航鍵遮到視覺重心
-  const tabHeight = Platform.OS === 'ios' ? 65 + insets.bottom : 95;
 
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+
+        /**
+         * ✨ 核心：讓 TabBar 浮起來
+         */
         tabBarStyle: {
-          backgroundColor: isDarkMode ? '#1E1E1E' : '#FFFFFF',
+          position: 'absolute',
+          left: 20,
+          right: 20,
+          bottom: isAndroid ? 20 : insets.bottom + 10,
+          borderRadius: 25,
+
+          height: 70,
+          paddingBottom: 8,
+          paddingTop: 8,
+
           borderTopWidth: 0,
-          elevation: 25, 
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -3 },
-          shadowOpacity: 0.2,
-          shadowRadius: 5,
-          height: tabHeight, 
-          // 修正：針對 Android 進行垂直位移
-          paddingBottom: isAndroid ? androidBottomPadding : insets.bottom,
-          paddingTop: 10,
+          backgroundColor: 'transparent',
+          elevation: 0,
         },
+
+        /**
+         * ✨ 背景：毛玻璃 + 半透明
+         */
+        tabBarBackground: () => (
+          <BlurView
+            intensity={80}
+            tint={isDarkMode ? 'dark' : 'light'}
+            style={{
+              flex: 1,
+              borderRadius: 25,
+              overflow: 'hidden',
+              backgroundColor: isDarkMode
+                ? 'rgba(30,30,30,0.6)'
+                : 'rgba(255,255,255,0.6)',
+            }}
+          />
+        ),
+
         tabBarActiveTintColor: activeColor,
         tabBarInactiveTintColor: inactiveColor,
+
         tabBarLabelStyle: {
           fontFamily: 'ZenKurenaido',
-          fontSize: 11, // 稍微縮小字體讓它更精緻
+          fontSize: 11,
           fontWeight: 'bold',
-          marginBottom: isAndroid ? 2 : 0, // 稍微讓字體往上提一點
         },
+
+        /**
+         * ✨ icon 動畫感（focus 放大）
+         */
         tabBarIcon: ({ color, size, focused }) => {
           let iconName: any;
+
           if (route.name === '首頁') iconName = focused ? 'grid' : 'grid-outline';
           else if (route.name === '個人') iconName = focused ? 'person' : 'person-outline';
           else if (route.name === '掃描') iconName = focused ? 'barcode' : 'barcode-outline';
           else if (route.name === '家庭') iconName = focused ? 'people' : 'people-outline';
           else if (route.name === '報表') iconName = focused ? 'bar-chart' : 'bar-chart-outline';
-          
-          return <Ionicons name={iconName} size={size + 2} color={color} />;
+
+          return (
+            <View
+              style={{
+                transform: [{ scale: focused ? 1.2 : 1 }],
+              }}
+            >
+              <Ionicons name={iconName} size={22} color={color} />
+            </View>
+          );
         },
       })}
     >

@@ -48,16 +48,14 @@ export default function ReportScreen() {
 
   const Colors = {
     bg: isDarkMode ? '#0A0A0F' : '#F8FAFC',
-    card: isDarkMode ? '#18181F' : '#FFFFFF',
+    card: isDarkMode ? '#1C1C23' : '#FFFFFF', // 統一與 Family.tsx 相同的卡片色
     text: isDarkMode ? '#F9FAFB' : '#0F172A',
     subText: isDarkMode ? '#A1A1AA' : '#64748B',
-    primary: '#8B5CF6',
+    primary: '#7C69EF', // 統一與 TabNavigator 相同的紫色
     accent: '#3B82F6',
     border: isDarkMode ? '#27272A' : '#E2E8F0',
   };
 
-  // 修正：當 progress 從 0 變到 1，offset 從 0 變到 CIRCUMFERENCE
-  // 這樣邊框（遮罩）才會「推走」並露出下方的圖表
   const animatedProps = useAnimatedProps(() => ({
     strokeDashoffset: CIRCUMFERENCE * progress.value,
   }));
@@ -65,7 +63,7 @@ export default function ReportScreen() {
   const fetchRealtimeReport = useCallback(async () => {
     if (!auth.currentUser) return;
     setLoading(true);
-    progress.value = 0; // 重置動畫
+    progress.value = 0; 
 
     try {
       let targetId = auth.currentUser.uid;
@@ -79,6 +77,7 @@ export default function ReportScreen() {
           idField = 'familyId';
         } else {
           setReportData(null);
+          setLoading(false);
           return;
         }
       }
@@ -113,7 +112,7 @@ export default function ReportScreen() {
         ? Object.keys(categoryTotals).map((name, index) => ({
             name,
             population: categoryTotals[name],
-            color: ['#8B5CF6', '#3B82F6', '#EC4899', '#10B981', '#F59E0B'][index % 5],
+            color: ['#7C69EF', '#A78BFA', '#3B82F6', '#EC4899', '#10B981'][index % 5],
             legendFontColor: Colors.text,
             legendFontSize: 12
           }))
@@ -131,7 +130,6 @@ export default function ReportScreen() {
         alertMessage: `尚有 $${upcomingPreorder.toLocaleString()} 待付款`
       });
 
-      // 觸發動畫
       setTimeout(() => {
         progress.value = withTiming(1, { 
           duration: 1500, 
@@ -145,7 +143,7 @@ export default function ReportScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeMode]);
+  }, [activeMode, Colors.text, Colors.subText]);
 
   useEffect(() => {
     fetchRealtimeReport();
@@ -162,27 +160,29 @@ export default function ReportScreen() {
   const chartConfig = {
     backgroundGradientFrom: Colors.card,
     backgroundGradientTo: Colors.card,
-    color: (opacity = 1) => `rgba(139, 92, 246, ${opacity})`,
+    color: (opacity = 1) => `rgba(124, 105, 239, ${opacity})`, // 使用主題紫色
     labelColor: () => Colors.subText,
     decimalPlaces: 0,
     propsForLabels: { fontFamily: 'ZenKurenaido' }
   };
 
   const chartWidth = screenWidth - 60;
-  // 修正對齊：PieChart 在 paddingLeft="0" 時，中心點微偏右
   const centerX = chartWidth / 4 + 10; 
   const centerY = 100;
 
   return (
     <ScrollView
       style={{ backgroundColor: Colors.bg }}
-      contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: 40 }}
+      contentContainerStyle={{ 
+        paddingTop: insets.top + 20, 
+        paddingBottom: 120 // 重要：留出空間給浮動 TabBar
+      }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={fetchRealtimeReport} tintColor={Colors.primary} />}
     >
       {/* Header & Tabs */}
-      <View style={styles.header}>
+      <MotiView from={{ opacity: 0, translateY: -10 }} animate={{ opacity: 1, translateY: 0 }} style={styles.header}>
         <Text style={[styles.title, { color: Colors.text }]}>消費分析</Text>
-        <View style={[styles.tabBar, { backgroundColor: Colors.card, borderColor: Colors.border }]}>
+        <View style={[styles.tabContainer, { backgroundColor: Colors.card, borderColor: Colors.border }]}>
           {(['personal', 'family'] as const).map(mode => (
             <TouchableOpacity
               key={mode}
@@ -195,7 +195,7 @@ export default function ReportScreen() {
             </TouchableOpacity>
           ))}
         </View>
-      </View>
+      </MotiView>
 
       {/* Summary Row */}
       <View style={styles.row}>
@@ -207,14 +207,18 @@ export default function ReportScreen() {
         </View>
         <View style={[styles.card, styles.shadow, { backgroundColor: Colors.card }]}>
           <Text style={[styles.label, { color: Colors.subText }]}>預購待付</Text>
-          <Text style={[styles.bigNumber, { color: Colors.accent }]}>
+          <Text style={[styles.bigNumber, { color: Colors.primary }]}>
             ${reportData?.upcomingPreorder.toLocaleString()}
           </Text>
         </View>
       </View>
 
       {/* Pie Chart Card */}
-      <MotiView style={[styles.chartCard, styles.shadow, { backgroundColor: Colors.card, marginTop: 20 }]}>
+      <MotiView 
+        from={{ opacity: 0, scale: 0.95 }} 
+        animate={{ opacity: 1, scale: 1 }}
+        style={[styles.chartCard, styles.shadow, { backgroundColor: Colors.card, marginTop: 20 }]}
+      >
         <Text style={[styles.sectionTitle, { color: Colors.text }]}>分類占比</Text>
         
         <View style={styles.pieWrapper}>
@@ -229,7 +233,6 @@ export default function ReportScreen() {
             absolute
           />
           
-          {/* 修正後的遮罩層 */}
           <View style={styles.svgOverlay} pointerEvents="none">
             <Svg height="200" width={chartWidth}>
               <AnimatedCircle
@@ -237,7 +240,7 @@ export default function ReportScreen() {
                 cy={centerY}
                 r={RADIUS}
                 stroke={Colors.card}
-                strokeWidth={RADIUS * 2 + 20} // 稍微大一點點確保蓋乾淨
+                strokeWidth={RADIUS * 2 + 20}
                 fill="none"
                 strokeDasharray={`${CIRCUMFERENCE} ${CIRCUMFERENCE}`}
                 animatedProps={animatedProps}
@@ -263,7 +266,7 @@ export default function ReportScreen() {
       </View>
 
       {/* AI Box */}
-      <View style={[styles.aiBox, styles.shadow, { backgroundColor: Colors.card }]}>
+      <View style={[styles.aiBox, styles.shadow, { backgroundColor: Colors.card, borderLeftColor: Colors.primary }]}>
         <View style={styles.aiHeader}>
           <Ionicons name="sparkles" size={18} color={Colors.primary} />
           <Text style={[styles.sectionTitle, { color: Colors.primary, marginLeft: 8, marginBottom: 0 }]}>AI 智能分析</Text>
@@ -281,18 +284,24 @@ export default function ReportScreen() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { paddingHorizontal: 20, marginBottom: 25 },
+  header: { paddingHorizontal: 25, marginBottom: 25 },
   title: { fontSize: 34, fontFamily: 'ZenKurenaido', marginBottom: 15 },
-  tabBar: { flexDirection: 'row', padding: 4, borderRadius: 20, borderWidth: 1, alignSelf: 'flex-start' },
-  tab: { paddingHorizontal: 22, paddingVertical: 10, borderRadius: 16 },
-  tabLabel: { fontFamily: 'ZenKurenaido', fontSize: 14 },
+  tabContainer: { flexDirection: 'row', padding: 4, borderRadius: 20, borderWidth: 1, alignSelf: 'flex-start' },
+  tab: { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 16 },
+  tabLabel: { fontFamily: 'ZenKurenaido', fontSize: 15 },
   row: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20 },
-  card: { width: '48%', padding: 22, borderRadius: 24 },
-  shadow: { shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 12, elevation: 3 },
+  card: { width: '48%', padding: 22, borderRadius: 28 },
+  shadow: { 
+    shadowColor: '#000', 
+    shadowOpacity: 0.08, 
+    shadowRadius: 15, 
+    elevation: 4,
+    shadowOffset: { width: 0, height: 4 }
+  },
   label: { fontSize: 13, fontFamily: 'ZenKurenaido' },
-  bigNumber: { fontSize: 24, fontFamily: 'ZenKurenaido', marginTop: 6 },
-  chartCard: { marginHorizontal: 20, padding: 20, borderRadius: 28 },
-  sectionTitle: { fontSize: 18, fontFamily: 'ZenKurenaido', marginBottom: 15 },
+  bigNumber: { fontSize: 24, fontFamily: 'ZenKurenaido', marginTop: 6, fontWeight: '600' },
+  chartCard: { marginHorizontal: 20, padding: 22, borderRadius: 32 },
+  sectionTitle: { fontSize: 18, fontFamily: 'ZenKurenaido', marginBottom: 15, fontWeight: 'bold' },
   pieWrapper: {
     position: 'relative',
     height: 200,
@@ -305,8 +314,8 @@ const styles = StyleSheet.create({
     left: 0,
     backgroundColor: 'transparent',
   },
-  aiBox: { margin: 20, padding: 20, borderRadius: 28, borderLeftWidth: 6, borderLeftColor: '#8B5CF6' },
+  aiBox: { margin: 20, padding: 22, borderRadius: 32, borderLeftWidth: 6 },
   aiHeader: { flexDirection: 'row', alignItems: 'center' },
-  aiText: { fontSize: 15, fontFamily: 'ZenKurenaido', marginBottom: 10 },
-  alertText: { fontSize: 15, fontFamily: 'ZenKurenaido', marginTop: 15, fontWeight: 'bold' }
+  aiText: { fontSize: 15, fontFamily: 'ZenKurenaido', marginBottom: 10, lineHeight: 22 },
+  alertText: { fontSize: 15, fontFamily: 'ZenKurenaido', marginTop: 15 }
 });

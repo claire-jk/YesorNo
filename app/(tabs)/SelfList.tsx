@@ -1,7 +1,8 @@
-// 個人清單頁面 - 動畫美化進階版
+// 個人清單頁面 - 浮動導航適配版
 import { useFonts, ZenKurenaido_400Regular } from '@expo-google-fonts/zen-kurenaido';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as Linking from 'expo-linking';
 import {
   addDoc,
   collection,
@@ -39,7 +40,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from './firebaseConfig';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const MONTHS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月', '未定'];
 
 // --- 型別定義 ---
@@ -57,7 +58,6 @@ interface Product {
   price?: string;
   image?: string;
   stock?: number;
-  isStockAdequate?: boolean;
   arrivalMonth?: string;
   totalPrice?: string;
   paidAmount?: string;
@@ -67,42 +67,33 @@ interface Product {
 }
 
 // --- 進階微動畫封裝組件 ---
-const ScalePressable = ({ children, onPress, style, onLongPress }: any) => {
+const ScalePressable = ({ children, onPress, style, onLongPress, disabled }: any) => {
   const scaleValue = useRef(new Animated.Value(1)).current;
-
   const onPressIn = () => {
-    Animated.spring(scaleValue, { toValue: 0.92, useNativeDriver: true, tension: 100, friction: 10 }).start();
+    if (disabled) return;
+    Animated.spring(scaleValue, { toValue: 0.96, useNativeDriver: true, tension: 100, friction: 10 }).start();
   };
   const onPressOut = () => {
     Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true, tension: 100, friction: 10 }).start();
   };
-
   return (
     <Animated.View style={[{ transform: [{ scale: scaleValue }] }, style]}>
-      <Pressable 
-        onPressIn={onPressIn} 
-        onPressOut={onPressOut} 
-        onPress={onPress} 
-        onLongPress={onLongPress}
-      >
+      <Pressable onPressIn={onPressIn} onPressOut={onPressOut} onPress={onPress} onLongPress={onLongPress} disabled={disabled}>
         {children}
       </Pressable>
     </Animated.View>
   );
 };
 
-// --- 自動進場動畫組件 ---
 const FadeInView = ({ children, delay = 0, style }: any) => {
   const anim = useRef(new Animated.Value(0)).current;
   const slide = useRef(new Animated.Value(20)).current;
-
   useEffect(() => {
     Animated.parallel([
       Animated.timing(anim, { toValue: 1, duration: 600, delay, useNativeDriver: true }),
       Animated.timing(slide, { toValue: 0, duration: 600, delay, useNativeDriver: true }),
     ]).start();
-  }, []);
-
+  }, [delay]);
   return <Animated.View style={[{ opacity: anim, transform: [{ translateY: slide }] }, style]}>{children}</Animated.View>;
 };
 
@@ -116,19 +107,16 @@ export default function SelfList() {
   const [activeTab, setActiveTab] = useState<'owned' | 'preorder'>('owned');
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [displayMode, setDisplayMode] = useState<'grid' | 'list'>('grid');
-
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-
   const [catModalVisible, setCatModalVisible] = useState(false);
   const [prodModalVisible, setProdModalVisible] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-
   const [newCatName, setNewCatName] = useState('');
   const [isConsumable, setIsConsumable] = useState(false);
-  const [productForm, setProductForm] = useState<Partial<Product>>({ arrivalMonth: '1月' });
+  const [productForm, setProductForm] = useState<Partial<Product>>({ arrivalMonth: '1月', url: '' });
   const [selectedImg, setSelectedImg] = useState<string | null>(null);
 
   // 動態數值
@@ -136,16 +124,19 @@ export default function SelfList() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const fabScale = useRef(new Animated.Value(1)).current;
 
-  // --- Cloudinary 設定 ---
+  // ✨ 適配浮動 TabBar 的高度計算 (Height 70 + Margin 20)
+  const TAB_BAR_OFFSET = Platform.OS === 'android' ? 110 : insets.bottom + 95;
+
   const CLOUD_NAME = "dfbzt23lp"; 
   const UPLOAD_PRESET = "YesorNoself"; 
 
+  // ✨ 配色同步 TabNavigator 的 activeColor
   const Colors = {
     bg: isDarkMode ? '#0F172A' : '#F8FAFC',
     card: isDarkMode ? '#1E293B' : '#FFFFFF',
     text: isDarkMode ? '#F1F5F9' : '#1E293B',
     subText: isDarkMode ? '#94A3B8' : '#64748B',
-    primary: activeTab === 'owned' ? '#6366F1' : '#F43F5E',
+    primary: '#FF6F61', // 珊瑚橘，與 TabNavigator 保持一致
     accent: '#10B981',
     inputBg: isDarkMode ? '#334155' : '#F1F5F9',
     border: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
@@ -153,11 +144,7 @@ export default function SelfList() {
 
   useEffect(() => {
     fadeAnim.setValue(0);
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 400,
-      useNativeDriver: true,
-    }).start();
+    Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }).start();
   }, [viewLevel]);
 
   useEffect(() => {
@@ -195,6 +182,12 @@ export default function SelfList() {
     }).start();
   };
 
+  const handleOpenLink = (url?: string) => {
+    if (!url) { Alert.alert("提示", "尚未設定連結"); return; }
+    const targetUrl = url.startsWith('http') ? url : `https://${url}`;
+    Linking.openURL(targetUrl).catch(() => Alert.alert("錯誤", "無法開啟此連結"));
+  };
+
   const pickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -202,9 +195,7 @@ export default function SelfList() {
       aspect: [1, 1],
       quality: 0.6,
     });
-    if (!result.canceled) {
-      setSelectedImg(result.assets[0].uri);
-    }
+    if (!result.canceled) { setSelectedImg(result.assets[0].uri); }
   };
 
   const uploadToCloudinary = async (uri: string) => {
@@ -212,70 +203,36 @@ export default function SelfList() {
     const data = new FormData();
     data.append('file', { uri: uri, type: 'image/jpeg', name: 'upload.jpg' } as any);
     data.append('upload_preset', UPLOAD_PRESET);
-    try {
-      const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
-        method: 'POST',
-        body: data,
-      });
-      const result = await response.json();
-      if (result.secure_url) return result.secure_url;
-      else throw new Error(result.error?.message || "上傳失敗");
-    } catch (error) {
-      console.error("Cloudinary Error:", error);
-      throw error;
-    }
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: data });
+    const result = await response.json();
+    return result.secure_url;
   };
 
   const saveProduct = async () => {
-    if (!productForm.name || !selectedCategory) {
-        Alert.alert("提示", "請輸入物品名稱");
-        return;
-    }
+    if (!productForm.name || !selectedCategory) { Alert.alert("提示", "請輸入物品名稱"); return; }
     setIsUploading(true);
     try {
       let finalImageUrl = productForm.image || '';
-      if (selectedImg && !selectedImg.startsWith('http')) {
-        finalImageUrl = await uploadToCloudinary(selectedImg);
-      }
-      const data = {
-        ...productForm,
-        image: finalImageUrl,
-        categoryId: selectedCategory.id,
-        type: activeTab,
-        userId: auth.currentUser?.uid,
-        updatedAt: serverTimestamp()
-      };
-      if (isEditing && editingId) {
-        await updateDoc(doc(db, 'products', editingId), data);
-      } else {
-        await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() });
-      }
+      if (selectedImg && !selectedImg.startsWith('http')) { finalImageUrl = await uploadToCloudinary(selectedImg); }
+      const data = { ...productForm, image: finalImageUrl, categoryId: selectedCategory.id, type: activeTab, userId: auth.currentUser?.uid, updatedAt: serverTimestamp() };
+      if (isEditing && editingId) { await updateDoc(doc(db, 'products', editingId), data); }
+      else { await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() }); }
       closeProdModal();
-    } catch (error) {
-      Alert.alert("上傳失敗", "無法儲存圖片或資料，請檢查 Cloudinary 設定");
-    } finally {
-      setIsUploading(false);
-    }
+    } catch (error) { Alert.alert("儲存失敗", "請檢查網路"); }
+    finally { setIsUploading(false); }
   };
 
   const openEditModal = (item: Product) => {
-    setProductForm(item);
-    setSelectedImg(item.image || null);
-    setEditingId(item.id);
-    setIsEditing(true);
-    setProdModalVisible(true);
+    setProductForm(item); setSelectedImg(item.image || null); setEditingId(item.id); setIsEditing(true); setProdModalVisible(true);
   };
 
   const closeProdModal = () => {
-    setProdModalVisible(false);
-    setIsEditing(false);
-    setProductForm({ arrivalMonth: '1月' });
-    setSelectedImg(null);
+    setProdModalVisible(false); setIsEditing(false); setProductForm({ arrivalMonth: '1月', url: '' }); setSelectedImg(null);
   };
 
   if (!fontsLoaded) return (
     <View style={[styles.loadingContainer, { backgroundColor: Colors.bg }]}>
-      <ActivityIndicator size="large" color="#6366F1" />
+      <ActivityIndicator size="large" color="#FF6F61" />
     </View>
   );
 
@@ -288,11 +245,8 @@ export default function SelfList() {
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: Colors.text }]}>{selectedCategory?.name}</Text>
         <TouchableOpacity 
-            onPress={() => {
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.spring);
-                setDisplayMode(displayMode === 'grid' ? 'list' : 'grid');
-            }} 
-            style={[styles.glassBtn, { backgroundColor: Colors.primary + '20' }]}
+          onPress={() => { LayoutAnimation.configureNext(LayoutAnimation.Presets.spring); setDisplayMode(displayMode === 'grid' ? 'list' : 'grid'); }} 
+          style={[styles.glassBtn, { backgroundColor: Colors.primary + '20' }]}
         >
           <Ionicons name={displayMode === 'grid' ? "list-outline" : "grid-outline"} size={22} color={Colors.primary} />
         </TouchableOpacity>
@@ -302,7 +256,7 @@ export default function SelfList() {
         data={products}
         key={displayMode}
         numColumns={displayMode === 'grid' ? 2 : 1}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: TAB_BAR_OFFSET }]} // ✨ 增加底部間距
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <FadeInView style={styles.emptyContainer}>
@@ -310,54 +264,58 @@ export default function SelfList() {
             <Text style={[styles.emptyText, { color: Colors.subText }]}>目前還沒有資料內容</Text>
           </FadeInView>
         }
-        renderItem={({ item, index }) => (
-          <FadeInView delay={index * 100}>
-            <ScalePressable 
+        renderItem={({ item, index }) => {
+          const paid = parseInt(item.paidAmount || '0');
+          const total = parseInt(item.totalPrice || '1') || 1;
+          const progress = Math.min(100, (paid / total) * 100);
+          return (
+            <FadeInView delay={index * 100}>
+              <ScalePressable 
                 onLongPress={() => openEditModal(item)}
                 onPress={() => openEditModal(item)}
-                style={[
-                displayMode === 'grid' ? styles.gridCard : styles.listCard,
-                { backgroundColor: Colors.card, borderColor: Colors.border, borderWidth: 1 }
-                ]}
-            >
+                style={[displayMode === 'grid' ? styles.gridCard : styles.listCard, { backgroundColor: Colors.card, borderColor: Colors.border, borderWidth: 1 }]}
+              >
                 <Image source={{ uri: item.image || 'https://via.placeholder.com/150' }} style={displayMode === 'grid' ? styles.gridImg : styles.listImg} />
                 <View style={styles.infoArea}>
-                <Text style={[styles.itemName, { color: Colors.text }]} numberOfLines={1}>{item.name}</Text>
-                
-                {activeTab === 'owned' ? (
+                  <Text style={[styles.itemName, { color: Colors.text }]} numberOfLines={1}>{item.name}</Text>
+                  {activeTab === 'owned' ? (
                     <View>
-                    <Text style={[styles.priceTag, { color: Colors.primary }]}>$ {item.price || '0'}</Text>
-                    {selectedCategory?.isConsumable && (
+                      <Text style={[styles.priceTag, { color: Colors.primary }]}>$ {item.price || '0'}</Text>
+                      {selectedCategory?.isConsumable && (
                         <View style={[styles.statusBadge, { backgroundColor: (item.stock || 0) > 0 ? '#E3F9E5' : '#FFEBEA' }]}>
-                            <Text style={[styles.statusText, { color: (item.stock || 0) > 0 ? '#10B981' : '#F43F5E' }]}>
-                                庫存: {item.stock || 0}
-                            </Text>
+                          <Text style={[styles.statusText, { color: (item.stock || 0) > 0 ? '#10B981' : '#F43F5E' }]}>庫存: {item.stock || 0}</Text>
                         </View>
-                    )}
+                      )}
                     </View>
-                ) : (
+                  ) : (
                     <View>
-                    <View style={styles.preorderHeader}>
+                      <View style={styles.preorderHeader}>
                         <Text style={[styles.preorderText, {color: Colors.subText}]}>{item.arrivalMonth} 到貨</Text>
                         <Text style={[styles.remainingText, { color: Colors.primary }]}>待付: ${item.remainingAmount || 0}</Text>
+                      </View>
+                      <View style={styles.progressBarBg}>
+                        <View style={[styles.progressBarFill, { backgroundColor: Colors.primary, width: `${progress}%` }]} />
+                      </View>
                     </View>
-                    <View style={styles.progressBarBg}>
-                        <View style={[styles.progressBarFill, { 
-                            backgroundColor: Colors.primary, 
-                            width: `${Math.min(100, (parseInt(item.paidAmount || '0') / (parseInt(item.totalPrice || '1') || 1)) * 100)}%` 
-                        }]} />
-                    </View>
-                    </View>
-                )}
+                  )}
                 </View>
-                <TouchableOpacity style={styles.delBtn} onPress={() => deleteDoc(doc(db, 'products', item.id))}>
-                <Ionicons name="trash-outline" size={16} color="#F43F5E" />
-                </TouchableOpacity>
-            </ScalePressable>
-          </FadeInView>
-        )}
+                <View style={displayMode === 'grid' ? styles.gridActionArea : styles.listActionArea}>
+                  {activeTab === 'preorder' && item.url && (
+                    <TouchableOpacity style={styles.actionIconBtn} onPress={() => handleOpenLink(item.url)}>
+                      <Ionicons name="link-outline" size={18} color={Colors.primary} />
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity style={styles.actionIconBtn} onPress={() => deleteDoc(doc(db, 'products', item.id))}>
+                    <Ionicons name="trash-outline" size={18} color="#F43F5E" />
+                  </TouchableOpacity>
+                </View>
+              </ScalePressable>
+            </FadeInView>
+          );
+        }}
       />
-      <Animated.View style={[styles.fab, { backgroundColor: Colors.primary, transform: [{ scale: fabScale }] }]}>
+      {/* ✨ FAB 位置上調 */}
+      <Animated.View style={[styles.fab, { backgroundColor: Colors.primary, bottom: TAB_BAR_OFFSET - 30, transform: [{ scale: fabScale }] }]}>
         <TouchableOpacity onPress={() => setProdModalVisible(true)} style={styles.fabInner}>
           <Ionicons name="add" size={32} color="#FFF" />
         </TouchableOpacity>
@@ -387,7 +345,7 @@ export default function SelfList() {
       </View>
 
       <ScrollView 
-        contentContainerStyle={styles.catScroll} 
+        contentContainerStyle={[styles.catScroll, { paddingBottom: TAB_BAR_OFFSET }]} 
         showsVerticalScrollIndicator={false}
         onScroll={(e) => {
             const offset = e.nativeEvent.contentOffset.y;
@@ -397,24 +355,25 @@ export default function SelfList() {
         <View style={styles.catWrapper}>
           {categories.map((cat, index) => (
             <FadeInView key={cat.id} delay={index * 80}>
-                <ScalePressable 
+              <ScalePressable 
                 style={[styles.categoryCard, { backgroundColor: Colors.card, borderColor: Colors.border, borderWidth: 1 }]}
                 onPress={() => { setSelectedCategory(cat); setViewLevel('detail'); }}
-                >
+              >
                 <View style={[styles.bubbleIcon, { backgroundColor: Colors.primary + '15' }]}>
-                    <Ionicons name={cat.isConsumable ? "flask-outline" : "cube-outline"} size={26} color={Colors.primary} />
+                  <Ionicons name={cat.isConsumable ? "flask-outline" : "cube-outline"} size={26} color={Colors.primary} />
                 </View>
                 <Text style={[styles.bubbleName, { color: Colors.text }]}>{cat.name}</Text>
                 <View style={[styles.typeBadge, { backgroundColor: cat.isConsumable ? (isDarkMode ? '#78350F30' : '#FEF3C7') : (isDarkMode ? '#1E40AF30' : '#DBEAFE') }]}>
-                    <Text style={[styles.typeText, { color: cat.isConsumable ? '#D97706' : '#2563EB' }]}>{cat.isConsumable ? "消耗品" : "耐久品"}</Text>
+                  <Text style={[styles.typeText, { color: cat.isConsumable ? '#D97706' : '#2563EB' }]}>{cat.isConsumable ? "消耗品" : "耐久品"}</Text>
                 </View>
-                </ScalePressable>
+              </ScalePressable>
             </FadeInView>
           ))}
         </View>
       </ScrollView>
 
-      <Animated.View style={[styles.fab, { backgroundColor: Colors.primary, transform: [{ scale: fabScale }] }]}>
+      {/* ✨ FAB 位置上調 */}
+      <Animated.View style={[styles.fab, { backgroundColor: Colors.primary, bottom: TAB_BAR_OFFSET - 30, transform: [{ scale: fabScale }] }]}>
         <TouchableOpacity style={styles.fabInner} onPress={() => setCatModalVisible(true)}>
             <Ionicons name="folder-open" size={28} color="#FFF" />
         </TouchableOpacity>
@@ -432,53 +391,27 @@ export default function SelfList() {
           <View style={[styles.modalCard, { backgroundColor: Colors.card, height: '90%' }]}>
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '加入清單'}</Text>
-            
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
               <ScalePressable style={[styles.imagePicker, { backgroundColor: Colors.inputBg }]} onPress={pickImage} disabled={isUploading}>
-                {selectedImg ? (
-                  <Image source={{ uri: selectedImg }} style={styles.previewImg} />
-                ) : (
+                {selectedImg ? <Image source={{ uri: selectedImg }} style={styles.previewImg} /> : (
                   <View style={styles.imagePlaceholder}>
                     <Ionicons name="cloud-upload-outline" size={48} color={Colors.subText} />
                     <Text style={{color: Colors.subText, marginTop: 10, fontFamily: 'ZenKurenaido'}}>點擊上傳圖片</Text>
                   </View>
                 )}
                 {isUploading && (
-                  <View style={styles.uploadingOverlay}>
-                    <ActivityIndicator size="small" color="#FFF" />
-                    <Text style={{color: '#FFF', marginTop: 5}}>處理中...</Text>
-                  </View>
+                  <View style={styles.uploadingOverlay}><ActivityIndicator size="small" color="#FFF" /><Text style={{color: '#FFF', marginTop: 5}}>處理中...</Text></View>
                 )}
               </ScalePressable>
-
               <Text style={[styles.formLabel, {color: Colors.text}]}>基本資料</Text>
-              <TextInput 
-                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} 
-                placeholder="物品名稱" 
-                value={productForm.name} 
-                placeholderTextColor={Colors.subText} 
-                onChangeText={t => setProductForm({...productForm, name: t})} 
-              />
-              
+              <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="物品名稱" value={productForm.name} placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, name: t})} />
               {activeTab === 'owned' ? (
                 <>
-                  <TextInput 
-                    style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} 
-                    placeholder="購入價格" 
-                    value={productForm.price} 
-                    keyboardType="numeric" 
-                    placeholderTextColor={Colors.subText} 
-                    onChangeText={t => setProductForm({...productForm, price: t})} 
-                  />
+                  <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="購入價格" value={productForm.price} keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, price: t})} />
                   {selectedCategory?.isConsumable && (
                     <View style={styles.inlineInputRow}>
                       <Text style={[styles.formLabel, {color: Colors.text, marginBottom: 0}]}>目前剩餘庫存</Text>
-                      <TextInput 
-                        style={[styles.modalInput, { width: 100, marginBottom: 0, textAlign: 'center', backgroundColor: Colors.inputBg, color: Colors.text }]} 
-                        value={productForm.stock?.toString()} 
-                        keyboardType="numeric" 
-                        onChangeText={t => setProductForm({...productForm, stock: parseInt(t) || 0})} 
-                      />
+                      <TextInput style={[styles.modalInput, { width: 100, marginBottom: 0, textAlign: 'center', backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.stock?.toString()} keyboardType="numeric" onChangeText={t => setProductForm({...productForm, stock: parseInt(t) || 0})} />
                     </View>
                   )}
                 </>
@@ -487,38 +420,22 @@ export default function SelfList() {
                   <Text style={[styles.formLabel, {color: Colors.text}]}>到貨月份：{productForm.arrivalMonth}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }}>
                     {MONTHS.map(m => (
-                      <TouchableOpacity 
-                        key={m} 
-                        onPress={() => setProductForm({...productForm, arrivalMonth: m})} 
-                        style={[styles.monthPick, { backgroundColor: productForm.arrivalMonth === m ? Colors.primary : Colors.inputBg }]}
-                      >
+                      <TouchableOpacity key={m} onPress={() => setProductForm({...productForm, arrivalMonth: m})} style={[styles.monthPick, { backgroundColor: productForm.arrivalMonth === m ? Colors.primary : Colors.inputBg }]}>
                         <Text style={{ fontFamily: 'ZenKurenaido', color: productForm.arrivalMonth === m ? '#FFF' : Colors.text }}>{m}</Text>
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
-                  <View style={styles.preorderInputs}>
-                    <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.totalPrice} placeholder="商品總價" keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, totalPrice: t})} />
-                    <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.paidAmount} placeholder="已付定金" keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, paidAmount: t})} />
-                    <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.remainingAmount} placeholder="剩餘尾款" keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, remainingAmount: t})} />
-                  </View>
+                  <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.totalPrice} placeholder="商品總價" keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, totalPrice: t})} />
+                  <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.paidAmount} placeholder="已付定金" keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, paidAmount: t})} />
+                  <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.remainingAmount} placeholder="剩餘尾款" keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, remainingAmount: t})} />
+                  <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.url} placeholder="商品購買連結 (選填)" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, url: t})} />
                 </>
               )}
             </ScrollView>
-            
             <View style={styles.actionRow}>
-              <TouchableOpacity onPress={closeProdModal} style={styles.cancelBtn} disabled={isUploading}>
-                <Text style={styles.cancelBtnText}>取消</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.mainBtn, {backgroundColor: isUploading ? '#94A3B8' : Colors.primary}]} 
-                onPress={saveProduct}
-                disabled={isUploading}
-              >
-                {isUploading ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <Text style={styles.mainBtnText}>{isEditing ? '更新內容' : '確認新增'}</Text>
-                )}
+              <TouchableOpacity onPress={closeProdModal} style={styles.cancelBtn} disabled={isUploading}><Text style={styles.cancelBtnText}>取消</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.mainBtn, {backgroundColor: isUploading ? '#94A3B8' : Colors.primary}]} onPress={saveProduct} disabled={isUploading}>
+                {isUploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.mainBtnText}>{isEditing ? '更新內容' : '確認新增'}</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -531,13 +448,7 @@ export default function SelfList() {
           <View style={[styles.modalCard, { backgroundColor: Colors.card, height: 'auto', paddingBottom: insets.bottom + 40 }]}>
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>建立新分類</Text>
-            <TextInput 
-              style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} 
-              placeholder="例如：彩妝、模型、保養品..." 
-              placeholderTextColor={Colors.subText} 
-              value={newCatName} 
-              onChangeText={setNewCatName} 
-            />
+            <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="例如：彩妝、模型..." placeholderTextColor={Colors.subText} value={newCatName} onChangeText={setNewCatName} />
             <View style={styles.switchBox}>
               <Text style={[styles.formLabel, {marginBottom: 0, color: Colors.text}]}>啟用庫存管理 (消耗品)</Text>
               <Switch value={isConsumable} onValueChange={setIsConsumable} trackColor={{ true: Colors.primary }} />
@@ -548,9 +459,7 @@ export default function SelfList() {
                 if(!newCatName) return;
                 await addDoc(collection(db, 'categories'), { name: newCatName, isConsumable, userId: auth.currentUser?.uid, createdAt: serverTimestamp() });
                 setNewCatName(''); setCatModalVisible(false);
-              }}>
-                <Text style={styles.mainBtnText}>確認建立</Text>
-              </TouchableOpacity>
+              }}><Text style={styles.mainBtnText}>確認建立</Text></TouchableOpacity>
             </View>
           </View>
         </View>
@@ -564,29 +473,26 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   mainTitle: { fontSize: 34, fontFamily: 'ZenKurenaido', letterSpacing: 1 },
   subTitle: { fontSize: 15, fontFamily: 'ZenKurenaido', marginBottom: 25, opacity: 0.7 },
-  
   tabSection: { paddingHorizontal: 30, marginBottom: 25 },
   tabBar: { flexDirection: 'row', height: 52, borderRadius: 26, padding: 5, elevation: 2 },
   tabIndicator: { position: 'absolute', width: '50%', height: '100%', borderRadius: 22, top: 5, left: 5, elevation: 3, shadowOpacity: 0.1, shadowRadius: 5 },
   tabItem: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabLabel: { fontSize: 16, fontFamily: 'ZenKurenaido' },
-
-  catScroll: { paddingHorizontal: 20, paddingBottom: 120 },
+  catScroll: { paddingHorizontal: 20 },
   catWrapper: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   categoryCard: { 
-    width: (width - 60) / 2, padding: 22, borderRadius: 30, alignItems: 'center', marginBottom: 20, 
-    elevation: 8, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.1, shadowRadius: 12
+    width: (width - 56) / 2, // 微調寬度
+    padding: 22, borderRadius: 30, alignItems: 'center',justifyContent: 'center', marginBottom: 16, 
+    elevation: 6, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8
   },
   bubbleIcon: { width: 60, height: 60, borderRadius: 22, justifyContent: 'center', alignItems: 'center', marginBottom: 15 },
-  bubbleName: { fontSize: 18, fontFamily: 'ZenKurenaido' },
+  bubbleName: { fontSize: 18, fontFamily: 'ZenKurenaido',textAlign: 'center', },
   typeBadge: { marginTop: 10, paddingHorizontal: 14, paddingVertical: 5, borderRadius: 12 },
   typeText: { fontSize: 11, fontFamily: 'ZenKurenaido' },
-
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingBottom: 20 },
   headerTitle: { fontSize: 22, fontFamily: 'ZenKurenaido' },
   glassBtn: { width: 46, height: 46, borderRadius: 16, justifyContent: 'center', alignItems: 'center', elevation: 2 },
-
-  listContent: { padding: 18, paddingBottom: 100 },
+  listContent: { padding: 18 },
   gridCard: { width: (width - 50) / 2, margin: 5, borderRadius: 28, overflow: 'hidden', elevation: 5, shadowOpacity: 0.1, marginBottom: 15 },
   listCard: { flexDirection: 'row', marginBottom: 16, borderRadius: 26, padding: 12, alignItems: 'center', elevation: 3, shadowOpacity: 0.06 },
   gridImg: { width: '100%', height: 170 },
@@ -596,30 +502,28 @@ const styles = StyleSheet.create({
   priceTag: { fontSize: 19, fontFamily: 'ZenKurenaido' },
   statusBadge: { alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10, marginTop: 8 },
   statusText: { fontSize: 11, fontFamily: 'ZenKurenaido' },
-  
   preorderHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   preorderText: { fontFamily: 'ZenKurenaido', fontSize: 12 },
   remainingText: { fontFamily: 'ZenKurenaido', fontSize: 14 },
   progressBarBg: { height: 7, backgroundColor: '#E2E8F0', borderRadius: 4, overflow: 'hidden' },
   progressBarFill: { height: '100%', borderRadius: 4 },
-
-  delBtn: { position: 'absolute', top: 10, right: 10, backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12, padding: 6, elevation: 2 },
+  gridActionArea: { position: 'absolute', top: 10, right: 10, flexDirection: 'row' },
+  listActionArea: { flexDirection: 'row', alignItems: 'center', marginLeft: 5 },
+  actionIconBtn: { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12, padding: 8, elevation: 2, marginLeft: 8 },
   emptyContainer: { alignItems: 'center', marginTop: 120, opacity: 0.4 },
   emptyText: { marginTop: 18, fontFamily: 'ZenKurenaido', fontSize: 16 },
-
   fab: { 
-    position: 'absolute', right: 25, bottom: 40, 
-    width: 68, height: 68, borderRadius: 34, 
-    elevation: 10, shadowColor: '#000', 
-    shadowOpacity: 0.3, shadowRadius: 8, 
-    overflow: 'hidden' 
+    position: 'absolute', right: 25, 
+    width: 64, height: 64, borderRadius: 32, 
+    elevation: 12, shadowColor: '#000', 
+    shadowOpacity: 0.3, shadowRadius: 10, 
+    overflow: 'hidden', zIndex: 999
   },
   fabInner: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
-
   overlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.75)', justifyContent: 'flex-end' },
   modalIndicator: { width: 45, height: 6, backgroundColor: '#CBD5E1', borderRadius: 3, alignSelf: 'center', marginBottom: 25, opacity: 0.5 },
   modalCard: { width: '100%', borderTopLeftRadius: 45, borderTopRightRadius: 45, padding: 25, alignItems: 'center', elevation: 20 },
-  modalHeader: { fontSize: 24, fontFamily: 'ZenKurenaido',  marginBottom: 25 },
+  modalHeader: { fontSize: 24, fontFamily: 'ZenKurenaido', marginBottom: 25 },
   modalInput: { width: '100%', padding: 18, borderRadius: 20, marginBottom: 15, fontFamily: 'ZenKurenaido', fontSize: 16, borderWidth: 1, borderColor: 'rgba(0,0,0,0.02)' },
   formLabel: { alignSelf: 'flex-start', marginBottom: 12, fontSize: 15, fontFamily: 'ZenKurenaido'},
   inlineInputRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginBottom: 20 },
@@ -629,11 +533,9 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: '#94A3B8', fontFamily: 'ZenKurenaido', fontSize: 16 },
   mainBtn: { paddingVertical: 16, paddingHorizontal: 40, borderRadius: 22, elevation: 5, justifyContent: 'center', alignItems: 'center', minWidth: 150 },
   mainBtnText: { color: '#FFF', fontFamily: 'ZenKurenaido', fontSize: 17 },
-  
   imagePicker: { width: '100%', height: 230, borderRadius: 30, borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 25, overflow: 'hidden' },
   imagePlaceholder: { alignItems: 'center' },
   previewImg: { width: '100%', height: '100%', resizeMode: 'cover' },
   uploadingOverlay: { position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   monthPick: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 18, marginRight: 12, elevation: 2 },
-  preorderInputs: { width: '100%' }
 });

@@ -232,7 +232,7 @@ export default function FamilyList() {
         data={products}
         key={displayMode}
         numColumns={displayMode === 'grid' ? 2 : 1}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: 120 }]} // 增加 paddingBottom 避免被 TabBar 遮擋
         renderItem={({ item, index }) => (
           <MotiView
             from={{ opacity: 0, scale: 0.9 }}
@@ -269,8 +269,8 @@ export default function FamilyList() {
               </View>
               <TouchableOpacity style={styles.delBtn} onPress={() => {
                   Alert.alert("刪除物品", "確定要刪除嗎？", [
-                      { text: "取消", style: "cancel" },
-                      { text: "刪除", style: "destructive", onPress: () => deleteDoc(doc(db, 'products', item.id)) }
+                    { text: "取消", style: "cancel" },
+                    { text: "刪除", style: "destructive", onPress: () => deleteDoc(doc(db, 'products', item.id)) }
                   ]);
               }}>
                 <Ionicons name="trash-outline" size={16} color="#F87171" />
@@ -279,7 +279,8 @@ export default function FamilyList() {
           </MotiView>
         )}
       />
-      <TouchableOpacity style={[styles.fab, { backgroundColor: Colors.primary, shadowColor: Colors.primary }]} onPress={() => setProdModalVisible(true)}>
+      {/* 修正 FAB 位置，避免與浮動 TabBar 重疊 */}
+      <TouchableOpacity style={[styles.fab, { backgroundColor: Colors.primary, shadowColor: Colors.primary, bottom: 100 }]} onPress={() => setProdModalVisible(true)}>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
     </View>
@@ -306,7 +307,7 @@ export default function FamilyList() {
             </View>
           </View>
 
-          <ScrollView contentContainerStyle={styles.catScroll} showsVerticalScrollIndicator={false}>
+          <ScrollView contentContainerStyle={[styles.catScroll, { paddingBottom: 130 }]} showsVerticalScrollIndicator={false}>
             <View style={styles.catWrapper}>
               {categories.map((cat, index) => (
                 <MotiView
@@ -336,7 +337,8 @@ export default function FamilyList() {
             </View>
           </ScrollView>
 
-          <TouchableOpacity style={[styles.fab, { backgroundColor: Colors.primary, shadowColor: Colors.primary }]} onPress={() => setCatModalVisible(true)}>
+          {/* 修正 FAB 位置 */}
+          <TouchableOpacity style={[styles.fab, { backgroundColor: Colors.primary, shadowColor: Colors.primary, bottom: 100 }]} onPress={() => setCatModalVisible(true)}>
             <Ionicons name="folder-open" size={24} color="#FFF" />
           </TouchableOpacity>
         </View>
@@ -434,14 +436,14 @@ const styles = StyleSheet.create({
   tabIndicator: { position: 'absolute', width: '50%', height: '100%', borderRadius: 12, top: 4, left: 4 },
   tabItem: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabLabel: { fontSize: 16, fontFamily: 'ZenKurenaido' },
-  catScroll: { paddingHorizontal: 20, paddingBottom: 100 },
+  catScroll: { paddingHorizontal: 20 },
   catWrapper: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   categoryBubble: { width: '100%', padding: 20, borderRadius: 24, alignItems: 'center', marginBottom: 15, elevation: 4, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 8 },
   iconCircle: { width: 50, height: 50, borderRadius: 25, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
   bubbleName: { fontSize: 18, fontFamily: 'ZenKurenaido' },
   typeBadge: { marginTop: 10, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
   typeText: { fontSize: 11, fontFamily: 'ZenKurenaido' },
-  listContent: { padding: 12, paddingBottom: 100 },
+  listContent: { padding: 12 },
   gridCard: { width: (width - 48) / 2, margin: 6, borderRadius: 20, overflow: 'hidden', elevation: 5, marginBottom: 12, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 5 },
   listCard: { flexDirection: 'row', width: width - 24, marginVertical: 6, marginHorizontal: 0, borderRadius: 20, padding: 12, alignItems: 'center', elevation: 3, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3 },
   gridImg: { width: '100%', height: 140 },
@@ -454,7 +456,7 @@ const styles = StyleSheet.create({
   preorderText: { fontSize: 12, fontFamily: 'ZenKurenaido', marginTop: 2 },
   remainingText: { fontSize: 14, fontFamily: 'ZenKurenaido', marginTop: 4 },
   delBtn: { position: 'absolute', top: 8, right: 8, padding: 4 },
-  fab: { position: 'absolute', right: 25, bottom: 30, width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', elevation: 12, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
+  fab: { position: 'absolute', right: 25, width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', elevation: 12, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalCard: { width: '100%', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 25, alignItems: 'center' },
   modalIndicator: { width: 40, height: 5, backgroundColor: '#DDD', borderRadius: 3, marginBottom: 20 },
