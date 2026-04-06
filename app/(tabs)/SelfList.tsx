@@ -1,4 +1,4 @@
-// 個人清單頁面 - 浮動導航適配版
+// 個人清單頁面 - 現代美化版 (含自定義圓角提示框與強化按鈕)
 import { useFonts, ZenKurenaido_400Regular } from '@expo-google-fonts/zen-kurenaido';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -17,7 +17,6 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -40,7 +39,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from './firebaseConfig';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const MONTHS = ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月', '未定'];
 
 // --- 型別定義 ---
@@ -71,7 +70,7 @@ const ScalePressable = ({ children, onPress, style, onLongPress, disabled }: any
   const scaleValue = useRef(new Animated.Value(1)).current;
   const onPressIn = () => {
     if (disabled) return;
-    Animated.spring(scaleValue, { toValue: 0.96, useNativeDriver: true, tension: 100, friction: 10 }).start();
+    Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true, tension: 100, friction: 10 }).start();
   };
   const onPressOut = () => {
     Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true, tension: 100, friction: 10 }).start();
@@ -109,8 +108,14 @@ export default function SelfList() {
   const [displayMode, setDisplayMode] = useState<'grid' | 'list'>('grid');
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  
+  // Modal 狀態
   const [catModalVisible, setCatModalVisible] = useState(false);
   const [prodModalVisible, setProdModalVisible] = useState(false);
+  
+  // 自定義提示框狀態 (取代 Alert)
+  const [customAlert, setCustomAlert] = useState<{show: boolean, title: string, msg: string, onConfirm?: () => void}>({show: false, title: '', msg: ''});
+
   const [isEditing, setIsEditing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -124,22 +129,20 @@ export default function SelfList() {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const fabScale = useRef(new Animated.Value(1)).current;
 
-  // ✨ 適配浮動 TabBar 的高度計算 (Height 70 + Margin 20)
   const TAB_BAR_OFFSET = Platform.OS === 'android' ? 110 : insets.bottom + 95;
-
   const CLOUD_NAME = "dfbzt23lp"; 
   const UPLOAD_PRESET = "YesorNoself"; 
 
-  // ✨ 配色同步 TabNavigator 的 activeColor
   const Colors = {
     bg: isDarkMode ? '#0F172A' : '#F8FAFC',
     card: isDarkMode ? '#1E293B' : '#FFFFFF',
     text: isDarkMode ? '#F1F5F9' : '#1E293B',
     subText: isDarkMode ? '#94A3B8' : '#64748B',
-    primary: '#FF6F61', // 珊瑚橘，與 TabNavigator 保持一致
+    primary: '#FF6F61', 
     accent: '#10B981',
     inputBg: isDarkMode ? '#334155' : '#F1F5F9',
     border: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+    overlay: 'rgba(15, 23, 42, 0.8)',
   };
 
   useEffect(() => {
@@ -172,6 +175,11 @@ export default function SelfList() {
     });
   }, [selectedCategory, activeTab]);
 
+  // --- 自定義提示工具 ---
+  const showAlert = (title: string, msg: string, onConfirm?: () => void) => {
+    setCustomAlert({ show: true, title, msg, onConfirm });
+  };
+
   const handleSwitchTab = (tab: 'owned' | 'preorder') => {
     setActiveTab(tab);
     Animated.spring(scrollX, {
@@ -183,9 +191,28 @@ export default function SelfList() {
   };
 
   const handleOpenLink = (url?: string) => {
-    if (!url) { Alert.alert("提示", "尚未設定連結"); return; }
+    if (!url) { showAlert("提示", "尚未設定購買連結唷！"); return; }
     const targetUrl = url.startsWith('http') ? url : `https://${url}`;
-    Linking.openURL(targetUrl).catch(() => Alert.alert("錯誤", "無法開啟此連結"));
+    Linking.openURL(targetUrl).catch(() => showAlert("錯誤", "無法開啟此連結"));
+  };
+
+  const handleCompletePreorder = (item: Product) => {
+    showAlert(
+      "確認收貨", 
+      `要把「${item.name}」移至已獲得清單嗎？`,
+      async () => {
+        try {
+          const productRef = doc(db, 'products', item.id);
+          await updateDoc(productRef, {
+            type: 'owned',
+            price: item.totalPrice || '0',
+            updatedAt: serverTimestamp()
+          });
+        } catch (error) {
+          showAlert("操作失敗", "請稍後再試");
+        }
+      }
+    );
   };
 
   const pickImage = async () => {
@@ -209,7 +236,7 @@ export default function SelfList() {
   };
 
   const saveProduct = async () => {
-    if (!productForm.name || !selectedCategory) { Alert.alert("提示", "請輸入物品名稱"); return; }
+    if (!productForm.name || !selectedCategory) { showAlert("提示", "請輸入物品名稱"); return; }
     setIsUploading(true);
     try {
       let finalImageUrl = productForm.image || '';
@@ -218,7 +245,7 @@ export default function SelfList() {
       if (isEditing && editingId) { await updateDoc(doc(db, 'products', editingId), data); }
       else { await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() }); }
       closeProdModal();
-    } catch (error) { Alert.alert("儲存失敗", "請檢查網路"); }
+    } catch (error) { showAlert("儲存失敗", "請檢查網路連線"); }
     finally { setIsUploading(false); }
   };
 
@@ -236,7 +263,6 @@ export default function SelfList() {
     </View>
   );
 
-  // --- 物品詳情頁 ---
   const renderProductDetail = () => (
     <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
       <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
@@ -256,7 +282,7 @@ export default function SelfList() {
         data={products}
         key={displayMode}
         numColumns={displayMode === 'grid' ? 2 : 1}
-        contentContainerStyle={[styles.listContent, { paddingBottom: TAB_BAR_OFFSET }]} // ✨ 增加底部間距
+        contentContainerStyle={[styles.listContent, { paddingBottom: TAB_BAR_OFFSET }]}
         showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           <FadeInView style={styles.emptyContainer}>
@@ -299,13 +325,25 @@ export default function SelfList() {
                     </View>
                   )}
                 </View>
+
+                {/* --- 右側/頂部動作按鈕區 --- */}
                 <View style={displayMode === 'grid' ? styles.gridActionArea : styles.listActionArea}>
-                  {activeTab === 'preorder' && item.url && (
-                    <TouchableOpacity style={styles.actionIconBtn} onPress={() => handleOpenLink(item.url)}>
-                      <Ionicons name="link-outline" size={18} color={Colors.primary} />
-                    </TouchableOpacity>
+                  {activeTab === 'preorder' && (
+                    <>
+                      <TouchableOpacity 
+                        style={[styles.actionIconBtn, styles.completeBtnShadow, { backgroundColor: Colors.accent }]} 
+                        onPress={() => handleCompletePreorder(item)}
+                      >
+                        <Ionicons name="checkmark-sharp" size={16} color="#FFF" />
+                      </TouchableOpacity>
+                      {item.url && (
+                        <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: Colors.primary + '15' }]} onPress={() => handleOpenLink(item.url)}>
+                          <Ionicons name="link-outline" size={18} color={Colors.primary} />
+                        </TouchableOpacity>
+                      )}
+                    </>
                   )}
-                  <TouchableOpacity style={styles.actionIconBtn} onPress={() => deleteDoc(doc(db, 'products', item.id))}>
+                  <TouchableOpacity style={[styles.actionIconBtn, { backgroundColor: '#F43F5E15' }]} onPress={() => showAlert("刪除確認", "確定要刪除這筆資料嗎？", () => deleteDoc(doc(db, 'products', item.id)))}>
                     <Ionicons name="trash-outline" size={18} color="#F43F5E" />
                   </TouchableOpacity>
                 </View>
@@ -314,7 +352,6 @@ export default function SelfList() {
           );
         }}
       />
-      {/* ✨ FAB 位置上調 */}
       <Animated.View style={[styles.fab, { backgroundColor: Colors.primary, bottom: TAB_BAR_OFFSET - 30, transform: [{ scale: fabScale }] }]}>
         <TouchableOpacity onPress={() => setProdModalVisible(true)} style={styles.fabInner}>
           <Ionicons name="add" size={32} color="#FFF" />
@@ -323,7 +360,6 @@ export default function SelfList() {
     </Animated.View>
   );
 
-  // --- 主頁面 ---
   const renderMainCategories = () => (
     <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
       <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
@@ -372,7 +408,6 @@ export default function SelfList() {
         </View>
       </ScrollView>
 
-      {/* ✨ FAB 位置上調 */}
       <Animated.View style={[styles.fab, { backgroundColor: Colors.primary, bottom: TAB_BAR_OFFSET - 30, transform: [{ scale: fabScale }] }]}>
         <TouchableOpacity style={styles.fabInner} onPress={() => setCatModalVisible(true)}>
             <Ionicons name="folder-open" size={28} color="#FFF" />
@@ -384,6 +419,41 @@ export default function SelfList() {
   return (
     <View style={[styles.container, { backgroundColor: Colors.bg }]}>
       {viewLevel === 'main' ? renderMainCategories() : renderProductDetail()}
+
+      {/* --- 自定義美化提示框 (Custom Alert Modal) --- */}
+      <Modal visible={customAlert.show} transparent animationType="fade">
+        <View style={styles.alertOverlay}>
+          <FadeInView style={[styles.alertBox, { backgroundColor: Colors.card }]}>
+            <View style={[styles.alertIconCircle, {backgroundColor: Colors.primary + '15'}]}>
+               <Ionicons name="notifications-outline" size={30} color={Colors.primary} />
+            </View>
+            <Text style={[styles.alertTitle, { color: Colors.text }]}>{customAlert.title}</Text>
+            <Text style={[styles.alertMsg, { color: Colors.subText }]}>{customAlert.msg}</Text>
+            
+            <View style={styles.alertActionRow}>
+              {customAlert.onConfirm && (
+                <TouchableOpacity 
+                  style={[styles.alertBtn, {backgroundColor: Colors.inputBg}]} 
+                  onPress={() => setCustomAlert({...customAlert, show: false})}
+                >
+                  <Text style={[styles.alertBtnText, {color: Colors.subText}]}>取消</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity 
+                style={[styles.alertBtn, {backgroundColor: Colors.primary, flex: 2}]} 
+                onPress={() => {
+                  if(customAlert.onConfirm) customAlert.onConfirm();
+                  setCustomAlert({...customAlert, show: false});
+                }}
+              >
+                <Text style={[styles.alertBtnText, {color: '#FFF'}]}>
+                  {customAlert.onConfirm ? '確認' : '我知道了'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </FadeInView>
+        </View>
+      </Modal>
 
       {/* --- 新增/編輯商品 Modal --- */}
       <Modal visible={prodModalVisible} transparent animationType="slide" onRequestClose={closeProdModal}>
@@ -481,7 +551,7 @@ const styles = StyleSheet.create({
   catScroll: { paddingHorizontal: 20 },
   catWrapper: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   categoryCard: { 
-    width: (width - 56) / 2, // 微調寬度
+    width: (width - 56) / 2,
     padding: 22, borderRadius: 30, alignItems: 'center',justifyContent: 'center', marginBottom: 16, 
     elevation: 6, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8
   },
@@ -507,9 +577,23 @@ const styles = StyleSheet.create({
   remainingText: { fontFamily: 'ZenKurenaido', fontSize: 14 },
   progressBarBg: { height: 7, backgroundColor: '#E2E8F0', borderRadius: 4, overflow: 'hidden' },
   progressBarFill: { height: '100%', borderRadius: 4 },
+  
+  // --- 按鈕美化 ---
   gridActionArea: { position: 'absolute', top: 10, right: 10, flexDirection: 'row' },
   listActionArea: { flexDirection: 'row', alignItems: 'center', marginLeft: 5 },
-  actionIconBtn: { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12, padding: 8, elevation: 2, marginLeft: 8 },
+  actionIconBtn: { borderRadius: 14, padding: 10, elevation: 3, marginLeft: 8, shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: {width: 0, height: 2} },
+  completeBtnShadow: { shadowColor: '#10B981' },
+  
+  // --- 提示框美化 (Zen Font + Round Design) ---
+  alertOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'center', alignItems: 'center' },
+  alertBox: { width: width * 0.82, padding: 30, borderRadius: 40, alignItems: 'center', elevation: 25 },
+  alertIconCircle: { width: 70, height: 70, borderRadius: 35, justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  alertTitle: { fontSize: 22, fontFamily: 'ZenKurenaido', marginBottom: 12 },
+  alertMsg: { fontSize: 16, fontFamily: 'ZenKurenaido', textAlign: 'center', lineHeight: 24, marginBottom: 25 },
+  alertActionRow: { flexDirection: 'row', width: '100%', gap: 12 },
+  alertBtn: { paddingVertical: 14, borderRadius: 25, justifyContent: 'center', alignItems: 'center', flex: 1 },
+  alertBtnText: { fontSize: 16, fontFamily: 'ZenKurenaido' },
+
   emptyContainer: { alignItems: 'center', marginTop: 120, opacity: 0.4 },
   emptyText: { marginTop: 18, fontFamily: 'ZenKurenaido', fontSize: 16 },
   fab: { 

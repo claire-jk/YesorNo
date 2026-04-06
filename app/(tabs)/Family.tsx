@@ -17,7 +17,6 @@ import { MotiView } from 'moti';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   FlatList,
@@ -79,6 +78,7 @@ export default function FamilyList() {
     subText: isDarkMode ? '#A1A1AA' : '#64748B',
     primary: '#7C69EF',
     secondary: '#A78BFA',
+    accent: '#FF8AAB',
     inputBg: isDarkMode ? '#2A2A35' : '#F1F5F9',
     glow: isDarkMode ? 'rgba(124, 105, 239, 0.15)' : 'rgba(0, 0, 0, 0.04)',
     border: isDarkMode ? '#33333F' : '#E2E8F0',
@@ -95,6 +95,12 @@ export default function FamilyList() {
   const [products, setProducts] = useState<Product[]>([]);
   const [catModalVisible, setCatModalVisible] = useState(false);
   const [prodModalVisible, setProdModalVisible] = useState(false);
+  
+  // 自定義提示訊息狀態
+  const [alertConfig, setAlertConfig] = useState<{visible: boolean, title: string, msg: string, onConfirm?: () => void}>({
+    visible: false, title: '', msg: ''
+  });
+
   const [isEditing, setIsEditing] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newCatName, setNewCatName] = useState('');
@@ -144,6 +150,10 @@ export default function FamilyList() {
     });
   }, [selectedCategory, activeTab, familyId]);
 
+  const showAlert = (title: string, msg: string, onConfirm?: () => void) => {
+    setAlertConfig({ visible: true, title, msg, onConfirm });
+  };
+
   const handleSwitchTab = (tab: 'owned' | 'preorder') => {
     setActiveTab(tab);
     Animated.spring(scrollX, {
@@ -167,7 +177,7 @@ export default function FamilyList() {
       const result = await response.json();
       return result.secure_url;
     } catch (error) {
-      Alert.alert('圖片上傳失敗');
+      showAlert('提示', '圖片上傳失敗');
       return null;
     } finally {
       setUploading(false);
@@ -191,10 +201,10 @@ export default function FamilyList() {
 
   const saveProduct = async () => {
     if (!productForm.name || !selectedCategory || !familyId) {
-        Alert.alert('請輸入必填欄位');
+        showAlert('注意', '請輸入必填欄位');
         return;
     }
-    if (uploading) { Alert.alert('請等待圖片上傳完成'); return; }
+    if (uploading) { showAlert('請稍候', '請等待圖片上傳完成'); return; }
     const data = { ...productForm, categoryId: selectedCategory.id, familyId, type: activeTab, updatedAt: serverTimestamp() };
     try {
         if (isEditing && editingId) {
@@ -203,7 +213,25 @@ export default function FamilyList() {
           await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() });
         }
         closeProdModal();
-    } catch (e) { Alert.alert('儲存失敗'); }
+    } catch (e) { showAlert('錯誤', '儲存失敗'); }
+  };
+
+  const convertToOwned = async (item: Product) => {
+    showAlert('到貨確認', `要將「${item.name}」移至已擁有嗎？`, async () => {
+        try {
+            await updateDoc(doc(db, 'products', item.id), {
+                type: 'owned',
+                // 將預購時的總價 (totalPrice) 轉入已擁有時的金額 (price)
+                price: item.totalPrice || '0', 
+                // 如果是消耗品，到貨後通常初始庫存設為 1 (或依需求調整)
+                stock: 1,
+                isStockAdequate: true,
+                updatedAt: serverTimestamp()
+            });
+        } catch (e) {
+            showAlert('錯誤', '轉換失敗');
+        }
+    });
   };
 
   const closeProdModal = () => {
@@ -215,6 +243,38 @@ export default function FamilyList() {
   };
 
   if (!fontsLoaded || loadingFamily) return <ActivityIndicator style={{ flex: 1 }} color="#7C69EF" />;
+
+  const CustomAlert = () => (
+    <Modal visible={alertConfig.visible} transparent animationType="fade">
+      <View style={styles.alertOverlay}>
+        <MotiView 
+          from={{ scale: 0.8, opacity: 0 }} 
+          animate={{ scale: 1, opacity: 1 }} 
+          style={[styles.alertBox, { backgroundColor: Colors.card }]}
+        >
+          <Text style={[styles.alertTitle, { color: Colors.text }]}>{alertConfig.title}</Text>
+          <Text style={[styles.alertMsg, { color: Colors.subText }]}>{alertConfig.msg}</Text>
+          <View style={styles.alertActionRow}>
+            <TouchableOpacity 
+              style={[styles.alertBtn, { backgroundColor: Colors.inputBg }]} 
+              onPress={() => setAlertConfig({ ...alertConfig, visible: false })}
+            >
+              <Text style={[styles.alertBtnText, { color: Colors.subText }]}>取消</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.alertBtn, { backgroundColor: Colors.primary }]} 
+              onPress={() => {
+                if(alertConfig.onConfirm) alertConfig.onConfirm();
+                setAlertConfig({ ...alertConfig, visible: false });
+              }}
+            >
+              <Text style={[styles.alertBtnText, { color: '#FFF' }]}>確認</Text>
+            </TouchableOpacity>
+          </View>
+        </MotiView>
+      </View>
+    </Modal>
+  );
 
   const renderDetail = () => (
     <View style={{ flex: 1 }}>
@@ -232,7 +292,7 @@ export default function FamilyList() {
         data={products}
         key={displayMode}
         numColumns={displayMode === 'grid' ? 2 : 1}
-        contentContainerStyle={[styles.listContent, { paddingBottom: 120 }]} // 增加 paddingBottom 避免被 TabBar 遮擋
+        contentContainerStyle={[styles.listContent, { paddingBottom: 120 }]}
         renderItem={({ item, index }) => (
           <MotiView
             from={{ opacity: 0, scale: 0.9 }}
@@ -264,14 +324,20 @@ export default function FamilyList() {
                   <>
                     <Text style={[styles.preorderText, { color: Colors.subText }]}>{item.arrivalMonth} 預計</Text>
                     <Text style={[styles.remainingText, { color: '#45AAF2' }]}>待付: ${item.totalPrice ? (Number(item.totalPrice) - Number(item.paidAmount || 0)) : 0}</Text>
+                    
+                    {/* 到貨轉移按鈕 */}
+                    <TouchableOpacity 
+                        style={[styles.convertBtn, { backgroundColor: Colors.primary }]}
+                        onPress={() => convertToOwned(item)}
+                    >
+                        <Ionicons name="gift-outline" size={14} color="#FFF" />
+                        <Text style={styles.convertBtnText}>已到貨</Text>
+                    </TouchableOpacity>
                   </>
                 )}
               </View>
               <TouchableOpacity style={styles.delBtn} onPress={() => {
-                  Alert.alert("刪除物品", "確定要刪除嗎？", [
-                    { text: "取消", style: "cancel" },
-                    { text: "刪除", style: "destructive", onPress: () => deleteDoc(doc(db, 'products', item.id)) }
-                  ]);
+                  showAlert("刪除物品", "確定要刪除嗎？", () => deleteDoc(doc(db, 'products', item.id)));
               }}>
                 <Ionicons name="trash-outline" size={16} color="#F87171" />
               </TouchableOpacity>
@@ -279,7 +345,6 @@ export default function FamilyList() {
           </MotiView>
         )}
       />
-      {/* 修正 FAB 位置，避免與浮動 TabBar 重疊 */}
       <TouchableOpacity style={[styles.fab, { backgroundColor: Colors.primary, shadowColor: Colors.primary, bottom: 100 }]} onPress={() => setProdModalVisible(true)}>
         <Ionicons name="add" size={32} color="#FFF" />
       </TouchableOpacity>
@@ -337,7 +402,6 @@ export default function FamilyList() {
             </View>
           </ScrollView>
 
-          {/* 修正 FAB 位置 */}
           <TouchableOpacity style={[styles.fab, { backgroundColor: Colors.primary, shadowColor: Colors.primary, bottom: 100 }]} onPress={() => setCatModalVisible(true)}>
             <Ionicons name="folder-open" size={24} color="#FFF" />
           </TouchableOpacity>
@@ -345,6 +409,8 @@ export default function FamilyList() {
       ) : renderDetail()}
 
       {/* Modal 部分 */}
+      <CustomAlert />
+
       <Modal visible={catModalVisible} transparent animationType="fade">
         <View style={styles.overlay}>
           <MotiView from={{ translateY: 300 }} animate={{ translateY: 0 }} style={[styles.modalCard, { backgroundColor: Colors.card }]}>
@@ -444,10 +510,10 @@ const styles = StyleSheet.create({
   typeBadge: { marginTop: 10, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
   typeText: { fontSize: 11, fontFamily: 'ZenKurenaido' },
   listContent: { padding: 12 },
-  gridCard: { width: (width - 48) / 2, margin: 6, borderRadius: 20, overflow: 'hidden', elevation: 5, marginBottom: 12, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 5 },
-  listCard: { flexDirection: 'row', width: width - 24, marginVertical: 6, marginHorizontal: 0, borderRadius: 20, padding: 12, alignItems: 'center', elevation: 3, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3 },
+  gridCard: { width: (width - 48) / 2, margin: 6, borderRadius: 24, overflow: 'hidden', elevation: 5, marginBottom: 12, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 5 },
+  listCard: { flexDirection: 'row', width: width - 24, marginVertical: 8, marginHorizontal: 0, borderRadius: 24, padding: 12, alignItems: 'center', elevation: 3, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 3 },
   gridImg: { width: '100%', height: 140 },
-  listImg: { width: 85, height: 85, borderRadius: 15 },
+  listImg: { width: 85, height: 85, borderRadius: 18 },
   infoArea: { flex: 1, paddingHorizontal: 12 },
   itemName: { fontSize: 16, fontFamily: 'ZenKurenaido' },
   priceTag: { fontSize: 18, fontFamily: 'ZenKurenaido', marginTop: 4 },
@@ -455,10 +521,10 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, fontFamily: 'ZenKurenaido' },
   preorderText: { fontSize: 12, fontFamily: 'ZenKurenaido', marginTop: 2 },
   remainingText: { fontSize: 14, fontFamily: 'ZenKurenaido', marginTop: 4 },
-  delBtn: { position: 'absolute', top: 8, right: 8, padding: 4 },
+  delBtn: { position: 'absolute', top: 12, right: 12, padding: 4 },
   fab: { position: 'absolute', right: 25, width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', elevation: 12, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
   overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { width: '100%', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 25, alignItems: 'center' },
+  modalCard: { width: '100%', borderTopLeftRadius: 36, borderTopRightRadius: 36, padding: 25, alignItems: 'center' },
   modalIndicator: { width: 40, height: 5, backgroundColor: '#DDD', borderRadius: 3, marginBottom: 20 },
   modalHeader: { fontSize: 24, fontFamily: 'ZenKurenaido', marginBottom: 20 },
   inputLabel: { alignSelf: 'flex-start', fontFamily: 'ZenKurenaido', fontSize: 14, marginBottom: 8, marginLeft: 4 },
@@ -472,5 +538,18 @@ const styles = StyleSheet.create({
   mainBtn: { flex: 2, paddingVertical: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   mainBtnText: { color: '#FFF', fontFamily: 'ZenKurenaido', fontSize: 16 },
   imagePicker: { width: '100%', height: 180, borderRadius: 20, borderStyle: 'dashed', borderWidth: 2, justifyContent: 'center', alignItems: 'center', marginBottom: 20, overflow: 'hidden' },
-  previewImg: { width: '100%', height: '100%' }
+  previewImg: { width: '100%', height: '100%' },
+  
+  // 新增到貨按鈕樣式
+  convertBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, marginTop: 10, alignSelf: 'flex-start' },
+  convertBtnText: { color: '#FFF', fontSize: 11, fontFamily: 'ZenKurenaido', marginLeft: 4 },
+
+  // 自定義 Alert 樣式
+  alertOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 30 },
+  alertBox: { width: '100%', borderRadius: 30, padding: 25, alignItems: 'center', elevation: 20 },
+  alertTitle: { fontSize: 22, fontFamily: 'ZenKurenaido', marginBottom: 12 },
+  alertMsg: { fontSize: 16, fontFamily: 'ZenKurenaido', textAlign: 'center', marginBottom: 25, lineHeight: 22 },
+  alertActionRow: { flexDirection: 'row', width: '100%', justifyContent: 'space-between' },
+  alertBtn: { flex: 0.48, paddingVertical: 14, borderRadius: 18, alignItems: 'center' },
+  alertBtnText: { fontFamily: 'ZenKurenaido', fontSize: 16 }
 });
