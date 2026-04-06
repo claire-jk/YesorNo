@@ -4,6 +4,7 @@ import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker'; // 新增相簿支援
 import { addDoc, collection } from 'firebase/firestore';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -23,7 +24,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { auth, db } from './firebaseConfig';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const PYTHON_BACKEND_URL = "https://pybackend-i3qu.onrender.com/auto_compare";
+
+// 更新為你最新的 API 端點路徑
+const BASE_URL = "https://pybackend-i3qu.onrender.com";
+const IMAGE_API = `${BASE_URL}/identify_by_image`;
+const NAME_API = `${BASE_URL}/identify_by_name`;
+const API_URL = "http:// 192.168.0.188:8000/identify_by_image";
 
 interface ScanResult {
   status: 'owned' | 'not_found';
@@ -44,7 +50,7 @@ export default function ScanScreen() {
   const [isScanning, setIsScanning] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [newItemName, setNewItemName] = useState('');
+  const [searchName, setSearchName] = useState(''); // 用於搜尋框
 
   const pulseAnim = useRef(new Animated.Value(0)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
@@ -78,23 +84,24 @@ export default function ScanScreen() {
     }
   }, [isScanning]);
 
-  const performAIScan = async () => {
-    if (!cameraRef.current || isScanning) return;
-    
+  // --- 核心邏輯：影像辨識處理 (相機與相簿通用) ---
+  const processImageRecognition = async (uri: string) => {
     const currentUser = auth.currentUser;
     if (!currentUser) {
-      Alert.alert("請先登入", "辨識功能需要驗證用戶身分");
+      Alert.alert("請先登入");
       return;
     }
+    console.log("--- [App Debug] 開始發送請求 ---");
+  console.log("目標 URL:", `${IMAGE_API}?user_id=${currentUser.uid}&mode=${mode}`);
 
     setIsScanning(true);
     setResult(null);
 
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
+      // 影像壓縮優化速度
       const manipResult = await ImageManipulator.manipulateAsync(
-        photo.uri,
-        [{ resize: { width: 500 } }], 
+        uri,
+        [{ resize: { width: 500 } }],
         { format: ImageManipulator.SaveFormat.JPEG }
       );
 
@@ -106,40 +113,91 @@ export default function ScanScreen() {
         type: 'image/jpeg',
       });
 
-      // 偵錯用：確認發送的 UID 是否與截圖中的 "Fe4PEq98..." 一致
-      console.log(`[Scan] 發送請求 - UID: ${currentUser.uid}, 模式: ${mode}`);
-
-      const response = await fetch(`${PYTHON_BACKEND_URL}?user_id=${currentUser.uid}&mode=${mode}`, {
+      const response = await fetch(`${IMAGE_API}?user_id=${currentUser.uid}&mode=${mode}`, {
         method: 'POST',
         body: formData,
         headers: { 'Accept': 'application/json' },
       });
 
-      if (!response.ok) throw new Error(`Server Status: ${response.status}`);
+      console.log("--- [App Debug] 伺服器回應狀態碼:", response.status);
+  
 
       const resData = await response.json();
-      console.log("[Scan] 伺服器回傳結果:", resData);
+console.log("--- [App Debug] 伺服器回傳內容:", resData);
 
       if (resData.status === 'success') {
-        // 情況 1：後端在 Firestore 成功找到對應 userId 的產品
         setResult({
           status: 'owned',
           name: resData.data.name,
-          stock: resData.data.stock || 1,
-          isSufficient: (resData.data.stock || 1) > 1,
+          stock: resData.data.stock || 0,
+          isSufficient: (resData.data.stock || 0) > 1,
           score: resData.data.score
         });
       } else {
-        // 情況 2：後端認得物品名稱 (best_guess)，但資料庫沒這筆資料
         setResult({ 
           status: 'not_found', 
           name: resData.best_guess || '未知物品' 
         });
-        setNewItemName(resData.best_guess !== "未知" ? resData.best_guess : "");
+        setSearchName(resData.best_guess !== "未知" ? resData.best_guess : "");
       }
     } catch (error) {
-      console.error("[Scan] 錯誤:", error);
-      Alert.alert("辨識失敗", "請確認網路連線或稍後再試");
+      console.error("[Scan] 影像辨識錯誤:", error);
+      Alert.alert("辨識失敗", "請檢查網路連線");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  // 1. 手機鏡頭辨識
+  const performAIScan = async () => {
+    if (!cameraRef.current || isScanning) return;
+    const photo = await cameraRef.current.takePictureAsync({ quality: 0.5 });
+    processImageRecognition(photo.uri);
+  };
+
+  // 2. 上傳相簿照片辨識
+  const pickImageAndScan = async () => {
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.5,
+    });
+
+    if (!pickerResult.canceled) {
+      processImageRecognition(pickerResult.assets[0].uri);
+    }
+  };
+
+  // 3. 輸入商品名稱辨識 (文字搜尋)
+  const handleNameSearch = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser || !searchName.trim()) return;
+
+    setIsScanning(true);
+    setResult(null);
+
+    try {
+      const response = await fetch(
+        `${NAME_API}?user_id=${currentUser.uid}&mode=${mode}&query_name=${encodeURIComponent(searchName)}`
+      );
+      const resData = await response.json();
+
+      if (resData.status === 'success') {
+        // 抓取搜尋結果的第一筆 (最接近的匹配)
+        const item = resData.data[0];
+        setResult({
+          status: 'owned',
+          name: item.name,
+          stock: item.stock,
+          isSufficient: item.stock > 1,
+          score: 1.0 // 文字匹配設為 100%
+        });
+        setShowAddModal(false);
+      } else {
+        Alert.alert("找不到物品", "您的庫存中沒有名稱相符的商品，是否直接新增？");
+      }
+    } catch (error) {
+      Alert.alert("搜尋失敗");
     } finally {
       setIsScanning(false);
     }
@@ -150,8 +208,8 @@ export default function ScanScreen() {
     if (!userId) return;
     try {
       await addDoc(collection(db, 'products'), {
-        name: newItemName,
-        userId: userId, // 確保這裡的欄位名稱與截圖中的 userId 一致
+        name: searchName,
+        userId: userId,
         type: 'owned',
         stock: 1,
         createdAt: new Date(),
@@ -159,7 +217,7 @@ export default function ScanScreen() {
         image: "" 
       });
       setShowAddModal(false);
-      setResult({ status: 'owned', name: newItemName, stock: 1, isSufficient: false });
+      setResult({ status: 'owned', name: searchName, stock: 1, isSufficient: false, score: 1.0 });
       Alert.alert("成功", "物品已加入庫存");
     } catch (e) { console.error(e); }
   };
@@ -190,7 +248,7 @@ export default function ScanScreen() {
           <Animated.View style={[styles.scanTargetBox, { opacity: pulseAnim, borderColor: Colors.primary }]}>
             <Animated.View style={[styles.scanLine, { backgroundColor: Colors.primary, transform: [{ translateY }] }]} />
           </Animated.View>
-          {isScanning && <Text style={[styles.zenText, styles.scanningText]}>正在分析影像...</Text>}
+          {isScanning && <Text style={[styles.zenText, styles.scanningText]}>正在處理中...</Text>}
         </View>
 
         {/* 頂部 Tab */}
@@ -239,7 +297,7 @@ export default function ScanScreen() {
                       系統辨識為「{result.name}」，但不在您的清單中。
                     </Text>
                     <TouchableOpacity 
-                      onPress={() => setShowAddModal(true)} 
+                      onPress={() => { setSearchName(result.name); setShowAddModal(true); }} 
                       style={[styles.addBtn, { backgroundColor: Colors.primary }]}
                     >
                       <Text style={styles.addBtnText}>+ 加入庫存</Text>
@@ -257,43 +315,51 @@ export default function ScanScreen() {
 
         {/* 底部按鈕 */}
         <View style={[styles.bottomUI, { bottom: tabBarHeight + 20 }]}>
-          <TouchableOpacity style={styles.subActionBtn}>
-            <View style={styles.iconCircle}><Ionicons name="barcode-outline" size={24} color="#FFF" /></View>
-            <Text style={styles.subActionLabel}>條碼</Text>
+          {/* 功能 2: 相簿上傳 */}
+          <TouchableOpacity style={styles.subActionBtn} onPress={pickImageAndScan}>
+            <View style={styles.iconCircle}><Ionicons name="image-outline" size={24} color="#FFF" /></View>
+            <Text style={styles.subActionLabel}>相簿</Text>
           </TouchableOpacity>
 
+          {/* 功能 1: 相機辨識 */}
           <TouchableOpacity onPress={performAIScan} disabled={isScanning} style={styles.mainScanBtn}>
             <View style={[styles.mainScanInner, { backgroundColor: Colors.primary }]}>
               {isScanning ? <ActivityIndicator color="#FFF" size="large" /> : <Ionicons name="scan-outline" size={42} color="#FFF" />}
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.subActionBtn}>
+          {/* 功能 3: 手動名稱搜尋 */}
+          <TouchableOpacity style={styles.subActionBtn} onPress={() => { setSearchName(''); setShowAddModal(true); }}>
             <View style={styles.iconCircle}><Ionicons name="search-outline" size={24} color="#FFF" /></View>
-            <Text style={styles.subActionLabel}>手動</Text>
+            <Text style={styles.subActionLabel}>搜尋</Text>
           </TouchableOpacity>
         </View>
 
       </CameraView>
 
-      {/* 新增 Modal */}
+      {/* 搜尋與新增 Modal */}
       <Modal visible={showAddModal} transparent animationType="slide">
         <BlurView intensity={50} tint="dark" style={styles.modalOverlay}>
           <View style={[styles.modalCard, { backgroundColor: isDarkMode ? '#1C1C23' : '#FFF' }]}>
-            <Text style={[styles.modalTitle, { color: Colors.text }]}>新增至清單</Text>
+            <Text style={[styles.modalTitle, { color: Colors.text }]}>名稱辨識 / 新增</Text>
             <TextInput 
               style={[styles.input, styles.zenText, { color: Colors.text, borderColor: Colors.primary }]}
-              value={newItemName}
-              onChangeText={setNewItemName}
-              placeholder="物品名稱"
+              value={searchName}
+              onChangeText={setSearchName}
+              placeholder="請輸入物品名稱..."
               placeholderTextColor="#999"
             />
             <View style={styles.modalActions}>
               <TouchableOpacity onPress={() => setShowAddModal(false)} style={styles.cancelBtn}>
                 <Text style={[styles.zenText, { color: Colors.subText }]}>取消</Text>
               </TouchableOpacity>
+              
+              <TouchableOpacity onPress={handleNameSearch} style={[styles.confirmBtn, { backgroundColor: '#4F46E5', marginRight: 5 }]}>
+                <Text style={[styles.zenText, { color: '#FFF' }]}>搜尋</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity onPress={handleAddToDB} style={[styles.confirmBtn, { backgroundColor: Colors.primary }]}>
-                <Text style={[styles.zenText, { color: '#FFF' }]}>確認加入</Text>
+                <Text style={[styles.zenText, { color: '#FFF' }]}>新增</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -303,6 +369,7 @@ export default function ScanScreen() {
   );
 }
 
+// 樣式保持不變，僅針對新按鈕微調
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#000' },
   zenText: { fontFamily: 'ZenKurenaido' },
@@ -334,7 +401,7 @@ const styles = StyleSheet.create({
   modalCard: { width: '85%', padding: 30, borderRadius: 35 },
   modalTitle: { fontSize: 22, fontFamily: 'ZenKurenaido', textAlign: 'center', marginBottom: 25, fontWeight: 'bold' },
   input: { borderWidth: 1, borderRadius: 18, padding: 16, marginBottom: 25, textAlign: 'center', fontSize: 18 },
-  modalActions: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  cancelBtn: { padding: 12 },
-  confirmBtn: { paddingVertical: 14, paddingHorizontal: 35, borderRadius: 18 },
+  modalActions: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  cancelBtn: { padding: 12, marginRight: 10 },
+  confirmBtn: { paddingVertical: 14, paddingHorizontal: 20, borderRadius: 18 },
 });
