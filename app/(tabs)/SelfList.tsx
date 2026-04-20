@@ -239,8 +239,16 @@ export default function SelfList() {
     if (!productForm.name || !selectedCategory) { showAlert("提示", "請輸入物品名稱"); return; }
     setIsUploading(true);
     try {
-      let finalImageUrl = productForm.image || '';
-      if (selectedImg && !selectedImg.startsWith('http')) { finalImageUrl = await uploadToCloudinary(selectedImg); }
+      // 邏輯修正：判斷圖片是否更動
+      let finalImageUrl = productForm.image || ''; 
+      if (selectedImg && !selectedImg.startsWith('http')) { 
+        // 只有在選取了新圖片(本地路徑)時才上傳
+        finalImageUrl = await uploadToCloudinary(selectedImg); 
+      } else {
+        // 如果 selectedImg 是 http 開頭或是 null，則直接沿用目前的狀態
+        finalImageUrl = selectedImg || '';
+      }
+
       const data = { ...productForm, image: finalImageUrl, categoryId: selectedCategory.id, type: activeTab, userId: auth.currentUser?.uid, updatedAt: serverTimestamp() };
       if (isEditing && editingId) { await updateDoc(doc(db, 'products', editingId), data); }
       else { await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() }); }
@@ -250,7 +258,11 @@ export default function SelfList() {
   };
 
   const openEditModal = (item: Product) => {
-    setProductForm(item); setSelectedImg(item.image || null); setEditingId(item.id); setIsEditing(true); setProdModalVisible(true);
+    setProductForm(item); 
+    setSelectedImg(item.image || null); // [修正重點]：將產品圖片同步到預覽狀態
+    setEditingId(item.id); 
+    setIsEditing(true); 
+    setProdModalVisible(true);
   };
 
   const closeProdModal = () => {
@@ -463,7 +475,7 @@ export default function SelfList() {
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '加入清單'}</Text>
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
               <ScalePressable style={[styles.imagePicker, { backgroundColor: Colors.inputBg }]} onPress={pickImage} disabled={isUploading}>
-                {selectedImg ? <Image source={{ uri: selectedImg }} style={styles.previewImg} /> : (
+                {selectedImg ? <Image source={{ uri: selectedImg }} style={styles.previewImg} key={selectedImg} /> : (
                   <View style={styles.imagePlaceholder}>
                     <Ionicons name="cloud-upload-outline" size={48} color={Colors.subText} />
                     <Text style={{color: Colors.subText, marginTop: 10, fontFamily: 'ZenKurenaido'}}>點擊上傳圖片</Text>
@@ -538,6 +550,7 @@ export default function SelfList() {
   );
 }
 
+// 樣式表 (保留您的樣式配置)
 const styles = StyleSheet.create({
   container: { flex: 1 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -617,9 +630,12 @@ const styles = StyleSheet.create({
   cancelBtnText: { color: '#94A3B8', fontFamily: 'ZenKurenaido', fontSize: 16 },
   mainBtn: { paddingVertical: 16, paddingHorizontal: 40, borderRadius: 22, elevation: 5, justifyContent: 'center', alignItems: 'center', minWidth: 150 },
   mainBtnText: { color: '#FFF', fontFamily: 'ZenKurenaido', fontSize: 17 },
-  imagePicker: { width: '100%', height: 230, borderRadius: 30, borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', justifyContent: 'center', alignItems: 'center', marginBottom: 25, overflow: 'hidden' },
-  imagePlaceholder: { alignItems: 'center' },
+  imagePicker: { width: '100%', height: 230, borderRadius: 30, borderStyle: 'dashed', borderWidth: 2, borderColor: '#CBD5E1', marginBottom: 25, overflow: 'hidden' },
+  imagePlaceholder: {flex: 1,justifyContent: 'center', alignItems: 'center' },
   previewImg: { width: '100%', height: '100%', resizeMode: 'cover' },
-  uploadingOverlay: { position: 'absolute', width: '100%', height: '100%', backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  uploadingOverlay: {   ...StyleSheet.absoluteFillObject,
+  backgroundColor: 'rgba(0,0,0,0.5)',
+  justifyContent: 'center',
+  alignItems: 'center'},
   monthPick: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 18, marginRight: 12, elevation: 2 },
 });

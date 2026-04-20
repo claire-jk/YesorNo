@@ -450,7 +450,7 @@ const styles = StyleSheet.create({
     tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center', zIndex: 2 },
     tabText: { fontSize: 15, fontFamily: 'ZenKurenaido' },
     slidingIndicator: { position: 'absolute', width: '48%', height: '84%', top: '8%', left: 4, borderRadius: 20, elevation: 3 },
-    activitySection: { marginVertical: 10 },
+    activitySection: { marginVertical: 10,marginBottom: 40, },
     sectionTitleRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 25, marginBottom: 12 },
     smallLabel: { fontSize: 14, fontFamily: 'ZenKurenaido' },
     activityCard: { width: 150, padding: 15, borderRadius: 22, marginRight: 12, borderLeftWidth: 5, elevation: 5 },
