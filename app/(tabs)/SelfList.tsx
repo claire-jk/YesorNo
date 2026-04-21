@@ -216,45 +216,122 @@ export default function SelfList() {
   };
 
   const pickImage = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.6,
-    });
-    if (!result.canceled) { setSelectedImg(result.assets[0].uri); }
+    console.log("點擊觸發成功");
+    try {
+      // 1. 先主動請求權限
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        showAlert("權限提示", "需要相簿權限才能選取圖片唷！請前往系統設定開啟。");
+        return;
+      }
+
+      // 2. 執行選取
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // 或是 ['images'] 視版本而定
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+      
+      console.log("ImagePicker Result:", result); // Debug 用
+
+      if (!result.canceled && result.assets && result.assets.length > 0) { 
+        const uri = result.assets[0].uri;
+        setSelectedImg(uri); 
+      }
+    } catch (error) {
+      console.error("開啟圖庫錯誤:", error);
+      showAlert("錯誤", "無法開啟相簿，請重試或重啟 App");
+    }
   };
 
   const uploadToCloudinary = async (uri: string) => {
     if (!uri || uri.startsWith('http')) return uri;
+
     const data = new FormData();
-    data.append('file', { uri: uri, type: 'image/jpeg', name: 'upload.jpg' } as any);
+    
+    // 針對不同平台的路徑處理
+    const fileUri = Platform.OS === 'ios' ? uri.replace('file://', '') : uri;
+    
+    // 取得副檔名，若無則預設 jpg
+    const fileName = uri.split('/').pop() || 'upload.jpg';
+    const match = /\.(\w+)$/.exec(fileName);
+    const type = match ? `image/${match[1]}` : `image/jpeg`;
+
+    data.append('file', {
+      uri: fileUri,
+      type: type,
+      name: fileName,
+    } as any);
+    
     data.append('upload_preset', UPLOAD_PRESET);
-    const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: data });
-    const result = await response.json();
-    return result.secure_url;
+
+    try {
+      const response = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+        method: 'POST',
+        body: data,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+
+      const result = await response.json();
+
+      if (response.ok && result.secure_url) {
+        return result.secure_url;
+      } else {
+        // 這裡會彈出 Cloudinary 回傳的具體錯誤訊息
+        const errorMsg = result.error?.message || '上傳失敗';
+        console.error("Cloudinary Error Details:", result);
+        throw new Error(errorMsg);
+      }
+    } catch (error: any) {
+      console.error("Network/Upload Error:", error);
+      throw error;
+    }
   };
 
   const saveProduct = async () => {
-    if (!productForm.name || !selectedCategory) { showAlert("提示", "請輸入物品名稱"); return; }
+    if (!productForm.name || !selectedCategory) { 
+      showAlert("提示", "請輸入物品名稱"); 
+      return; 
+    }
+    
     setIsUploading(true);
     try {
-      // 邏輯修正：判斷圖片是否更動
       let finalImageUrl = productForm.image || ''; 
+
       if (selectedImg && !selectedImg.startsWith('http')) { 
-        // 只有在選取了新圖片(本地路徑)時才上傳
+        // 執行上傳
         finalImageUrl = await uploadToCloudinary(selectedImg); 
-      } else {
-        // 如果 selectedImg 是 http 開頭或是 null，則直接沿用目前的狀態
-        finalImageUrl = selectedImg || '';
       }
 
-      const data = { ...productForm, image: finalImageUrl, categoryId: selectedCategory.id, type: activeTab, userId: auth.currentUser?.uid, updatedAt: serverTimestamp() };
-      if (isEditing && editingId) { await updateDoc(doc(db, 'products', editingId), data); }
-      else { await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() }); }
+      const data = { 
+        ...productForm, 
+        image: finalImageUrl, 
+        categoryId: selectedCategory.id, 
+        type: activeTab, 
+        userId: auth.currentUser?.uid, 
+        updatedAt: serverTimestamp() 
+      };
+
+      if (isEditing && editingId) { 
+        await updateDoc(doc(db, 'products', editingId), data); 
+      } else { 
+        await addDoc(collection(db, 'products'), { 
+          ...data, 
+          createdAt: serverTimestamp() 
+        }); 
+      }
       closeProdModal();
-    } catch (error) { showAlert("儲存失敗", "請檢查網路連線"); }
-    finally { setIsUploading(false); }
+    } catch (error: any) { 
+      // 將具體的錯誤顯示出來，例如：Cloudinary 回傳的 "Invalid upload_preset"
+      showAlert("儲存失敗", error.message || "請檢查網路連線或圖片格式"); 
+    } finally { 
+      setIsUploading(false); 
+    }
   };
 
   const openEditModal = (item: Product) => {
@@ -266,7 +343,7 @@ export default function SelfList() {
   };
 
   const closeProdModal = () => {
-    setProdModalVisible(false); setIsEditing(false); setProductForm({ arrivalMonth: '1月', url: '' }); setSelectedImg(null);
+    setProdModalVisible(false); setIsUploading(false);setIsEditing(false); setProductForm({ arrivalMonth: '1月', url: '' }); setSelectedImg(null);
   };
 
   if (!fontsLoaded) return (
@@ -474,17 +551,23 @@ export default function SelfList() {
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '加入清單'}</Text>
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
-              <ScalePressable style={[styles.imagePicker, { backgroundColor: Colors.inputBg }]} onPress={pickImage} disabled={isUploading}>
-                {selectedImg ? <Image source={{ uri: selectedImg }} style={styles.previewImg} key={selectedImg} /> : (
+              <TouchableOpacity 
+                activeOpacity={0.7}
+                style={[styles.imagePicker, { backgroundColor: Colors.inputBg, zIndex: 999 }]} 
+                onPress={() => {
+                  console.log("點擊觸發成功");
+                  pickImage();
+                }}
+              >
+                {selectedImg ? (
+                  <Image source={{ uri: selectedImg }} style={styles.previewImg} />
+                ) : (
                   <View style={styles.imagePlaceholder}>
                     <Ionicons name="cloud-upload-outline" size={48} color={Colors.subText} />
-                    <Text style={{color: Colors.subText, marginTop: 10, fontFamily: 'ZenKurenaido'}}>點擊上傳圖片</Text>
+                    <Text style={{color: Colors.subText, marginTop: 10}}>點擊上傳圖片</Text>
                   </View>
                 )}
-                {isUploading && (
-                  <View style={styles.uploadingOverlay}><ActivityIndicator size="small" color="#FFF" /><Text style={{color: '#FFF', marginTop: 5}}>處理中...</Text></View>
-                )}
-              </ScalePressable>
+              </TouchableOpacity>
               <Text style={[styles.formLabel, {color: Colors.text}]}>基本資料</Text>
               <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="物品名稱" value={productForm.name} placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, name: t})} />
               {activeTab === 'owned' ? (
