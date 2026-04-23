@@ -832,8 +832,17 @@ useEffect(() => {
       </Modal>
       {/* --- 移動商品 Modal --- */}
       <Modal visible={moveModalVisible} transparent animationType="fade">
-        <View style={styles.overlay}>
-          <View style={[styles.modalCard, { backgroundColor: Colors.card, maxHeight: '75%' }]}>
+        <Pressable 
+          style={styles.overlay}
+          onPress={() => {
+            setMoveModalVisible(false);
+            setMovingItem(null);
+          }}
+        >
+          <Pressable
+            style={[styles.modalCard, { backgroundColor: Colors.card, maxHeight: '75%' }]}
+            onPress={(e) => e.stopPropagation()}
+          >
 
             <View style={styles.modalIndicator} />
 
@@ -957,8 +966,8 @@ useEffect(() => {
               </Text>
             </TouchableOpacity>
 
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );

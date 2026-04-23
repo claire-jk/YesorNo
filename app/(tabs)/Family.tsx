@@ -71,6 +71,30 @@ export default function FamilyList() {
   const insets = useSafeAreaInsets();
   const isDarkMode = useColorScheme() === 'dark';
 
+const [moveModalVisible, setMoveModalVisible] = useState(false);
+const [movingProduct, setMovingProduct] = useState<Product | null>(null);
+const openMoveModal = (item: Product) => {
+  setMovingProduct(item);
+  setMoveModalVisible(true);
+};
+const moveToCategory = async (targetCategoryId: string) => {
+  if (!movingProduct) return;
+
+  try {
+    await updateDoc(doc(db, 'products', movingProduct.id), {
+      categoryId: targetCategoryId,
+      updatedAt: serverTimestamp(),
+    });
+
+    setMoveModalVisible(false);
+    setMovingProduct(null);
+
+    showAlert('完成', '已成功移動分類');
+  } catch (e) {
+    showAlert('錯誤', '移動失敗');
+  }
+};
+
   const Colors = {
     bg: isDarkMode ? '#0F0F12' : '#F8FAFC',
     card: isDarkMode ? '#1C1C23' : '#FFFFFF',
@@ -302,7 +326,15 @@ export default function FamilyList() {
             style={displayMode === 'list' ? { width: '100%' } : null}
           >
             <Pressable 
-              onPress={() => { setProductForm(item); setSelectedImg(item.image || null); setEditingId(item.id); setIsEditing(true); setProdModalVisible(true); }}
+              onPress={() => { 
+                setProductForm(item); 
+                setSelectedImg(item.image || null); 
+                setEditingId(item.id); 
+                setIsEditing(true); 
+                setProdModalVisible(true); 
+              }}
+              onLongPress={() => openMoveModal(item)}
+              delayLongPress={400}
               style={({ pressed }) => [
                 displayMode === 'grid' ? styles.gridCard : styles.listCard, 
                 { backgroundColor: Colors.card, shadowColor: Colors.glow, borderColor: Colors.border, borderWidth: 1, transform: [{ scale: pressed ? 0.97 : 1 }] }
@@ -486,6 +518,92 @@ export default function FamilyList() {
           </View>
         </View>
       </Modal>
+      {/* 移動分類 Modal */}
+<Modal
+  visible={moveModalVisible}
+  transparent
+  animationType="fade"
+  onRequestClose={() => setMoveModalVisible(false)}
+>
+  {/* 背景遮罩（點這裡關閉） */}
+  <Pressable
+    style={styles.overlay}
+    onPress={() => setMoveModalVisible(false)}
+  >
+    {/* 內容區（阻止冒泡） */}
+    <Pressable style={{ width: '100%', alignItems: 'center' }} onPress={() => {}}>
+
+      <View
+        style={[
+          styles.modalCard,
+          {
+            backgroundColor: Colors.card,
+            maxHeight: '80%',
+            width: '100%',
+            paddingBottom: 15,
+          },
+        ]}
+      >
+
+        {/* 上方拖曳條 */}
+        <View style={styles.modalIndicator} />
+
+        {/* 標題 */}
+        <Text style={[styles.modalHeader, { color: Colors.text }]}>
+          移動分類
+        </Text>
+
+        {/* 目前移動的商品 */}
+        <Text
+          style={{
+            color: Colors.subText,
+            marginBottom: 15,
+            fontFamily: 'ZenKurenaido',
+          }}
+        >
+          {movingProduct?.name}
+        </Text>
+
+        {/* 分類列表 */}
+        <ScrollView
+          style={{ width: '100%' }}
+          contentContainerStyle={{ paddingBottom: 10 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {categories
+            .filter(c => c.id !== selectedCategory?.id)
+            .map(cat => (
+              <TouchableOpacity
+                key={cat.id}
+                onPress={() => moveToCategory(cat.id)}
+                style={{
+                  padding: 16,
+                  borderRadius: 14,
+                  backgroundColor: Colors.inputBg,
+                  marginBottom: 10,
+                }}
+              >
+                <Text style={{ color: Colors.text, fontFamily: 'ZenKurenaido' }}>
+                  {cat.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+        </ScrollView>
+
+        {/* 底部取消 */}
+        <View style={styles.modalFooter}>
+          <TouchableOpacity
+            onPress={() => setMoveModalVisible(false)}
+            style={styles.cancelButton}
+          >
+            <Text style={styles.cancelText}>取消</Text>
+          </TouchableOpacity>
+        </View>
+
+      </View>
+    </Pressable>
+  </Pressable>
+</Modal>
     </View>
   );
 }
@@ -523,10 +641,10 @@ const styles = StyleSheet.create({
   remainingText: { fontSize: 14, fontFamily: 'ZenKurenaido', marginTop: 4 },
   delBtn: { position: 'absolute', top: 12, right: 12, padding: 4 },
   fab: { position: 'absolute', right: 25, width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center', elevation: 12, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 10 },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard: { width: '100%', borderTopLeftRadius: 36, borderTopRightRadius: 36, padding: 25, alignItems: 'center' },
-  modalIndicator: { width: 40, height: 5, backgroundColor: '#DDD', borderRadius: 3, marginBottom: 20 },
-  modalHeader: { fontSize: 24, fontFamily: 'ZenKurenaido', marginBottom: 20 },
+  //overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  //modalCard: { width: '100%', borderTopLeftRadius: 36, borderTopRightRadius: 36, padding: 25, alignItems: 'center', flex: 1, },
+  //modalIndicator: { width: 40, height: 5, backgroundColor: '#DDD', borderRadius: 3, marginBottom: 20 },
+  //modalHeader: { fontSize: 24, fontFamily: 'ZenKurenaido', marginBottom: 20 },
   inputLabel: { alignSelf: 'flex-start', fontFamily: 'ZenKurenaido', fontSize: 14, marginBottom: 8, marginLeft: 4 },
   modalInput: { width: '100%', padding: 16, borderRadius: 16, marginBottom: 16, fontFamily: 'ZenKurenaido', fontSize: 16 },
   switchBox: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', alignItems: 'center', marginVertical: 10, paddingHorizontal: 5 },
@@ -551,5 +669,54 @@ const styles = StyleSheet.create({
   alertMsg: { fontSize: 16, fontFamily: 'ZenKurenaido', textAlign: 'center', marginBottom: 25, lineHeight: 22 },
   alertActionRow: { flexDirection: 'row', width: '100%', justifyContent: 'space-between' },
   alertBtn: { flex: 0.48, paddingVertical: 14, borderRadius: 18, alignItems: 'center' },
-  alertBtnText: { fontFamily: 'ZenKurenaido', fontSize: 16 }
+  alertBtnText: { fontFamily: 'ZenKurenaido', fontSize: 16 },
+overlay: {
+  flex: 1,
+  backgroundColor: 'rgba(0,0,0,0.5)',
+  justifyContent: 'flex-end',
+  alignItems: 'center',
+  paddingHorizontal: 10,
+},
+
+modalCard: {
+  borderTopLeftRadius: 30,
+  borderTopRightRadius: 30,
+  padding: 20,
+  alignItems: 'center',
+  width: '100%',
+},
+
+modalIndicator: {
+  width: 40,
+  height: 5,
+  backgroundColor: '#DDD',
+  borderRadius: 3,
+  marginBottom: 15,
+},
+
+modalHeader: {
+  fontSize: 20,
+  fontFamily: 'ZenKurenaido',
+  marginBottom: 10,
+},
+
+modalFooter: {
+  width: '100%',
+  paddingTop: 10,
+  borderTopWidth: 1,
+  borderTopColor: '#E5E7EB',
+},
+
+cancelButton: {
+  paddingVertical: 14,
+  borderRadius: 14,
+  backgroundColor: '#F1F5F9',
+  alignItems: 'center',
+},
+
+cancelText: {
+  color: '#64748B',
+  fontFamily: 'ZenKurenaido',
+  fontSize: 16,
+},
 });
