@@ -57,6 +57,9 @@ interface Product {
   price?: string;
   image?: string;
   stock?: number;
+  consumableType?: 'count' | 'liquid'; // 庫存型 / 液態型
+  liquidStatus?: 'enough' | 'low';     // 液態狀態
+  safeStock?: number;                 // 安全庫存量
   arrivalMonth?: string;
   totalPrice?: string;
   paidAmount?: string;
@@ -82,6 +85,17 @@ const ScalePressable = ({ children, onPress, style, onLongPress, disabled }: any
       </Pressable>
     </Animated.View>
   );
+};
+
+//庫存量
+const isLowStock = (item: Product) => {
+  if (item.consumableType === 'count') {
+    return (item.stock || 0) <= (item.safeStock || 0);
+  }
+  if (item.consumableType === 'liquid') {
+    return item.liquidStatus === 'low';
+  }
+  return false;
 };
 
 const FadeInView = ({ children, delay = 0, style }: any) => {
@@ -128,6 +142,10 @@ export default function SelfList() {
   const scrollX = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const fabScale = useRef(new Animated.Value(1)).current;
+
+  //移動商品類別
+  const [moveModalVisible, setMoveModalVisible] = useState(false);
+  const [movingItem, setMovingItem] = useState<Product | null>(null);
 
   const TAB_BAR_OFFSET = Platform.OS === 'android' ? 110 : insets.bottom + 95;
   const CLOUD_NAME = "dfbzt23lp"; 
@@ -386,7 +404,10 @@ export default function SelfList() {
           return (
             <FadeInView delay={index * 100}>
               <ScalePressable 
-                onLongPress={() => openEditModal(item)}
+                onLongPress={() => {
+                  setMovingItem(item);
+                  setMoveModalVisible(true);
+                }}
                 onPress={() => openEditModal(item)}
                 style={[displayMode === 'grid' ? styles.gridCard : styles.listCard, { backgroundColor: Colors.card, borderColor: Colors.border, borderWidth: 1 }]}
               >
@@ -396,11 +417,45 @@ export default function SelfList() {
                   {activeTab === 'owned' ? (
                     <View>
                       <Text style={[styles.priceTag, { color: Colors.primary }]}>$ {item.price || '0'}</Text>
-                      {selectedCategory?.isConsumable && (
-                        <View style={[styles.statusBadge, { backgroundColor: (item.stock || 0) > 0 ? '#E3F9E5' : '#FFEBEA' }]}>
-                          <Text style={[styles.statusText, { color: (item.stock || 0) > 0 ? '#10B981' : '#F43F5E' }]}>庫存: {item.stock || 0}</Text>
-                        </View>
-                      )}
+                        {selectedCategory?.isConsumable && (
+                          <>
+                            {item.consumableType === 'count' && (
+                              <View style={[
+                                styles.statusBadge,
+                                {
+                                  backgroundColor: isLowStock(item) ? '#FFEBEA' : '#E3F9E5'
+                                }
+                              ]}>
+                                <Text style={[
+                                  styles.statusText,
+                                  {
+                                    color: isLowStock(item) ? '#F43F5E' : '#10B981'
+                                  }
+                                ]}>
+                                  庫存: {item.stock || 0}（安全:{item.safeStock || 0}）
+                                </Text>
+                              </View>
+                            )}
+
+                            {item.consumableType === 'liquid' && (
+                              <View style={[
+                                styles.statusBadge,
+                                {
+                                  backgroundColor: item.liquidStatus === 'low' ? '#FFEBEA' : '#E3F9E5'
+                                }
+                              ]}>
+                                <Text style={[
+                                  styles.statusText,
+                                  {
+                                    color: item.liquidStatus === 'low' ? '#F43F5E' : '#10B981'
+                                  }
+                                ]}>
+                                  {item.liquidStatus === 'low' ? '⚠️ 短缺' : '💧 充足'}
+                                </Text>
+                              </View>
+                            )}
+                          </>
+                        )}
                     </View>
                   ) : (
                     <View>
@@ -573,12 +628,109 @@ export default function SelfList() {
               {activeTab === 'owned' ? (
                 <>
                   <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="購入價格" value={productForm.price} keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, price: t})} />
-                  {selectedCategory?.isConsumable && (
-                    <View style={styles.inlineInputRow}>
-                      <Text style={[styles.formLabel, {color: Colors.text, marginBottom: 0}]}>目前剩餘庫存</Text>
-                      <TextInput style={[styles.modalInput, { width: 100, marginBottom: 0, textAlign: 'center', backgroundColor: Colors.inputBg, color: Colors.text }]} value={productForm.stock?.toString()} keyboardType="numeric" onChangeText={t => setProductForm({...productForm, stock: parseInt(t) || 0})} />
-                    </View>
-                  )}
+                      {selectedCategory?.isConsumable && (
+                        <>
+                          <Text style={[styles.formLabel, { color: Colors.text }]}>
+                            消耗品類型
+                          </Text>
+
+                          {/* 類型切換 */}
+                          <View style={{ flexDirection: 'row', marginBottom: 15 }}>
+                            {['count', 'liquid'].map(type => (
+                              <TouchableOpacity
+                                key={type}
+                                onPress={() => setProductForm({
+                                  ...productForm,
+                                  consumableType: type as any
+                                })}
+                                style={{
+                                  padding: 12,
+                                  borderRadius: 16,
+                                  marginRight: 10,
+                                  backgroundColor:
+                                    productForm.consumableType === type
+                                      ? Colors.primary
+                                      : Colors.inputBg
+                                }}
+                              >
+                                <Text style={{
+                                  color:
+                                    productForm.consumableType === type
+                                      ? '#FFF'
+                                      : Colors.text,
+                                  fontFamily: 'ZenKurenaido'
+                                }}>
+                                  {type === 'count' ? '📦 庫存型' : '💧 液態型'}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
+                          {/* 📦 庫存型 */}
+                          {productForm.consumableType === 'count' && (
+                            <>
+                              <TextInput
+                                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
+                                placeholder="目前庫存"
+                                keyboardType="numeric"
+                                value={productForm.stock?.toString()}
+                                onChangeText={t =>
+                                  setProductForm({ ...productForm, stock: parseInt(t) || 0 })
+                                }
+                              />
+
+                              <TextInput
+                                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
+                                placeholder="安全庫存量（低於提醒）"
+                                keyboardType="numeric"
+                                value={productForm.safeStock?.toString()}
+                                onChangeText={t =>
+                                  setProductForm({ ...productForm, safeStock: parseInt(t) || 0 })
+                                }
+                              />
+                            </>
+                          )}
+
+                          {/* 💧 液態型 */}
+                          {productForm.consumableType === 'liquid' && (
+                            <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+                              {[
+                                { key: 'enough', label: '💧 充足' },
+                                { key: 'low', label: '⚠️ 短缺' }
+                              ].map(opt => (
+                                <TouchableOpacity
+                                  key={opt.key}
+                                  onPress={() =>
+                                    setProductForm({
+                                      ...productForm,
+                                      liquidStatus: opt.key as any
+                                    })
+                                  }
+                                  style={{
+                                    padding: 12,
+                                    borderRadius: 16,
+                                    marginRight: 10,
+                                    backgroundColor:
+                                      productForm.liquidStatus === opt.key
+                                        ? Colors.primary
+                                        : Colors.inputBg
+                                  }}
+                                >
+                                  <Text style={{
+                                    color:
+                                      productForm.liquidStatus === opt.key
+                                        ? '#FFF'
+                                        : Colors.text,
+                                    fontFamily: 'ZenKurenaido'
+                                  }}>
+                                    {opt.label}
+                                  </Text>
+                                </TouchableOpacity>
+                              ))}
+                            </View>
+                          )}
+                        </>
+                      )}
                 </>
               ) : (
                 <>
@@ -626,6 +778,136 @@ export default function SelfList() {
                 setNewCatName(''); setCatModalVisible(false);
               }}><Text style={styles.mainBtnText}>確認建立</Text></TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+      {/* --- 移動商品 Modal --- */}
+      <Modal visible={moveModalVisible} transparent animationType="fade">
+        <View style={styles.overlay}>
+          <View style={[styles.modalCard, { backgroundColor: Colors.card, maxHeight: '75%' }]}>
+
+            <View style={styles.modalIndicator} />
+
+            <Text style={[styles.modalHeader, { color: Colors.text }]}>
+              移動到其他分類
+            </Text>
+
+            {/* 目前分類提示 */}
+            <View style={{
+              backgroundColor: Colors.primary + '15',
+              padding: 12,
+              borderRadius: 16,
+              marginBottom: 20,
+              width: '100%',
+              alignItems: 'center'
+            }}>
+              <Text style={{ color: Colors.primary, fontFamily: 'ZenKurenaido' }}>
+                目前分類：{categories.find(c => c.id === movingItem?.categoryId)?.name}
+              </Text>
+            </View>
+
+            <ScrollView style={{ width: '100%' }} showsVerticalScrollIndicator={false}>
+              {categories
+                .filter(cat => cat.id !== movingItem?.categoryId)
+                .map((cat, index) => (
+                  
+                  <FadeInView key={cat.id} delay={index * 80}>
+                    <ScalePressable
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        padding: 18,
+                        borderRadius: 22,
+                        marginBottom: 14,
+                        backgroundColor: Colors.inputBg,
+                        borderWidth: 1,
+                        borderColor: Colors.border
+                      }}
+                      onPress={async () => {
+                        if (!movingItem) return;
+
+                        try {
+                          await updateDoc(doc(db, 'products', movingItem.id), {
+                            categoryId: cat.id,
+                            updatedAt: serverTimestamp()
+                          });
+
+                          setMoveModalVisible(false);
+                          setMovingItem(null);
+
+                        } catch (e) {
+                          showAlert("錯誤", "移動失敗");
+                        }
+                      }}
+                    >
+
+                      {/* icon */}
+                      <View style={{
+                        width: 50,
+                        height: 50,
+                        borderRadius: 16,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        marginRight: 14,
+                        backgroundColor: Colors.primary + '20'
+                      }}>
+                        <Ionicons
+                          name={cat.isConsumable ? "flask-outline" : "cube-outline"}
+                          size={22}
+                          color={Colors.primary}
+                        />
+                      </View>
+
+                      {/* 文字區 */}
+                      <View style={{ flex: 1 }}>
+                        <Text style={{
+                          color: Colors.text,
+                          fontFamily: 'ZenKurenaido',
+                          fontSize: 16
+                        }}>
+                          {cat.name}
+                        </Text>
+
+                        <Text style={{
+                          color: Colors.subText,
+                          fontSize: 12,
+                          marginTop: 4,
+                          fontFamily: 'ZenKurenaido'
+                        }}>
+                          {cat.isConsumable ? "消耗品分類" : "耐久品分類"}
+                        </Text>
+                      </View>
+
+                      {/* arrow */}
+                      <Ionicons
+                        name="chevron-forward"
+                        size={20}
+                        color={Colors.subText}
+                      />
+
+                    </ScalePressable>
+                  </FadeInView>
+
+                ))}
+            </ScrollView>
+
+            {/* 取消按鈕 */}
+            <TouchableOpacity
+              onPress={() => setMoveModalVisible(false)}
+              style={{
+                marginTop: 10,
+                paddingVertical: 14,
+                borderRadius: 20,
+                backgroundColor: Colors.inputBg,
+                width: '100%',
+                alignItems: 'center'
+              }}
+            >
+              <Text style={{ color: Colors.subText, fontFamily: 'ZenKurenaido' }}>
+                取消
+              </Text>
+            </TouchableOpacity>
+
           </View>
         </View>
       </Modal>
