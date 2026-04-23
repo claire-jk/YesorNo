@@ -11,6 +11,7 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where
 } from 'firebase/firestore';
@@ -48,6 +49,7 @@ interface Category {
   name: string;
   isConsumable: boolean;
   userId: string;
+  lastAutoAddedAt?: number;
 }
 
 interface Product {
@@ -66,6 +68,7 @@ interface Product {
   remainingAmount?: string;
   url?: string;
   type: 'owned' | 'preorder';
+  lastAutoAddedAt?: number;
 }
 
 // --- 進階微動畫封裝組件 ---
@@ -114,14 +117,60 @@ export default function SelfList() {
   let [fontsLoaded] = useFonts({ ZenKurenaido: ZenKurenaido_400Regular });
   const insets = useSafeAreaInsets();
   const isDarkMode = useColorScheme() === 'dark';
+const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+const [products, setProducts] = useState<Product[]>([]);
+const consumables = selectedCategory?.isConsumable
+  ? products.filter((item: Product) =>
+      item.consumableType === 'count' ||
+      item.consumableType === 'liquid'
+    )
+  : [];
+useEffect(() => {
+  const checkStock = async () => {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    for (const item of consumables) {
+      const isLow =
+        item.consumableType === 'count'
+          ? (item.stock || 0) <= (item.safeStock || 0)
+          : item.liquidStatus === 'low';
+
+      if (isLow && !item.lastAutoAddedAt) {
+        try {
+          // 加入 Home wishlist
+          await setDoc(doc(db, 'wishlist', item.id),  {
+            name: item.name,
+            userId: user.uid,
+            createdAt: serverTimestamp(),
+            category: 'shopping',
+            sourceProductId: item.id
+          });
+
+          // 標記避免重複加入
+          await updateDoc(doc(db, 'products', item.id), {
+            lastAutoAddedAt: Date.now()
+          });
+
+        } catch (e) {
+          console.log('Auto add error:', e);
+        }
+      }
+    }
+  };
+
+  if (consumables.length > 0) {
+    checkStock();
+  }
+}, [consumables]);
 
   // 狀態管理
   const [viewLevel, setViewLevel] = useState<'main' | 'detail'>('main');
   const [activeTab, setActiveTab] = useState<'owned' | 'preorder'>('owned');
-  const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+  //const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [displayMode, setDisplayMode] = useState<'grid' | 'list'>('grid');
   const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  //const [products, setProducts] = useState<Product[]>([]);
   
   // Modal 狀態
   const [catModalVisible, setCatModalVisible] = useState(false);
