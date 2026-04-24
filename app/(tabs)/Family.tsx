@@ -1,5 +1,6 @@
 import { useFonts, ZenKurenaido_400Regular } from '@expo-google-fonts/zen-kurenaido';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import {
   addDoc,
@@ -10,6 +11,7 @@ import {
   onSnapshot,
   query,
   serverTimestamp,
+  setDoc,
   updateDoc,
   where
 } from 'firebase/firestore';
@@ -74,63 +76,68 @@ export default function FamilyList() {
   let [fontsLoaded] = useFonts({ ZenKurenaido: ZenKurenaido_400Regular });
   const insets = useSafeAreaInsets();
   const isDarkMode = useColorScheme() === 'dark';
+const prevProductsRef = useRef<Map<string, Product>>(new Map());
+const triggerCacheRef = useRef<Set<string>>(new Set());
 
-const [moveModalVisible, setMoveModalVisible] = useState(false);
-const [movingProduct, setMovingProduct] = useState<Product | null>(null);
-const openMoveModal = (item: Product) => {
-  setMovingProduct(item);
-  setMoveModalVisible(true);
-};
-const moveToCategory = async (targetCategoryId: string) => {
-  if (!movingProduct) return;
+  const [moveModalVisible, setMoveModalVisible] = useState(false);
+  const [movingProduct, setMovingProduct] = useState<Product | null>(null);
+  const openMoveModal = (item: Product) => {
+    setMovingProduct(item);
+    setMoveModalVisible(true);
+  };
+  const moveToCategory = async (targetCategoryId: string) => {
+    if (!movingProduct) return;
 
-  try {
-    await updateDoc(doc(db, 'products', movingProduct.id), {
-      categoryId: targetCategoryId,
-      updatedAt: serverTimestamp(),
-    });
+    try {
+      if (!movingProduct?.id) return;
+      await updateDoc(doc(db, 'products', movingProduct.id), {
+        categoryId: targetCategoryId,
+        updatedAt: serverTimestamp(),
+      });
 
-    setMoveModalVisible(false);
-    setMovingProduct(null);
+      setMoveModalVisible(false);
+      setMovingProduct(null);
 
-    showAlert('完成', '已成功移動分類');
-  } catch (e) {
-    showAlert('錯誤', '移動失敗');
-  }
-};
-
-const deleteCategory = async (category: Category) => {
-  if (!familyId) return;
-
-  showAlert(
-    '刪除分類',
-    `確定要刪除「${category.name}」嗎？分類內商品也會被保留但失去分類。`,
-    async () => {
-      try {
-        // 1. 刪除分類
-        await deleteDoc(doc(db, 'categories', category.id));
-
-        // 2. （可選但建議）把該分類的商品解除分類
-        const q = query(
-          collection(db, 'products'),
-          where('categoryId', '==', category.id)
-        );
-
-        const snap = await getDocs(q);
-
-        snap.forEach(async (d) => {
-          await updateDoc(doc(db, 'products', d.id), {
-            categoryId: null,
-            updatedAt: serverTimestamp(),
-          });
-        });
-
-      } catch (e) {
-        showAlert('錯誤', '刪除失敗');
-      }
+      showAlert('完成', '已成功移動分類');
+    } catch (e) {
+      showAlert('錯誤', '移動失敗');
     }
-  );
-};
+  };
+
+  const deleteCategory = async (category: Category) => {
+    if (!familyId) return;
+
+    showAlert(
+      '刪除分類',
+      `確定要刪除「${category.name}」嗎？分類內商品也會被保留但失去分類。`,
+      async () => {
+        try {
+          // 1. 刪除分類
+          await deleteDoc(doc(db, 'categories', category.id));
+
+          // 2. （可選但建議）把該分類的商品解除分類
+          const q = query(
+            collection(db, 'products'),
+            where('categoryId', '==', category.id)
+          );
+
+          const snap = await getDocs(q);
+
+          await Promise.all(
+            snap.docs.map(d =>
+              updateDoc(doc(db, 'products', d.id), {
+                categoryId: null,
+                updatedAt: serverTimestamp(),
+              })
+            )
+          );
+
+        } catch (e) {
+          showAlert('錯誤', '刪除失敗');
+        }
+      }
+    );
+  };
 
   const Colors = {
     bg: isDarkMode ? '#0F0F12' : '#F8FAFC',
@@ -156,7 +163,63 @@ const deleteCategory = async (category: Category) => {
   const [products, setProducts] = useState<Product[]>([]);
   const [catModalVisible, setCatModalVisible] = useState(false);
   const [prodModalVisible, setProdModalVisible] = useState(false);
-  
+const pushedRef = useRef<Set<string>>(new Set());
+//同步庫存
+const checkAndPushToFamilyWishlist = async (product: Product) => {
+  try {
+    if (!familyId || !auth.currentUser) return;
+
+    const key = `${familyId}_${product.id}`;
+
+    // ⭐ 防重點1：已經處理過就直接跳過
+    if (pushedRef.current.has(key)) {
+      return;
+    }
+
+    let isNeedBuy = false;
+
+    if (product.consumableType === 'count') {
+      const stock = product.stock ?? 0;
+      const safe = product.safeStock ?? 0;
+      if (stock <= safe) isNeedBuy = true;
+    }
+
+    if (product.consumableType === 'liquid') {
+      if (!product.isLiquidAdequate) isNeedBuy = true;
+    }
+
+    if (!isNeedBuy) return;
+
+    // ⭐ 先標記（避免重複觸發）
+    pushedRef.current.add(key);
+
+    const q = query(
+      collection(db, 'family_wishlist'),
+      where('familyId', '==', familyId),
+      where('userId', '==', auth.currentUser.uid),
+      where('source', '==', 'auto-from-family'),
+      where('productId', '==', product.id)
+    );
+
+    const snap = await getDocs(q);
+
+    if (!snap.empty) return;
+
+    const docId = `${familyId}_${product.id}_${auth.currentUser.uid}`;
+
+    await setDoc(doc(db, 'family_wishlist', docId), {
+      name: product.name,
+      productId: product.id,
+      userId: auth.currentUser.uid,
+      familyId,
+      source: 'auto-from-family',
+      createdAt: serverTimestamp(),
+    });
+
+  } catch (err) {
+    console.error(err);
+  }
+};
   // 自定義提示訊息狀態
   const [alertConfig, setAlertConfig] = useState<{visible: boolean, title: string, msg: string, onConfirm?: () => void}>({
     visible: false, title: '', msg: ''
@@ -171,20 +234,24 @@ const deleteCategory = async (category: Category) => {
 
   const scrollX = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    const fetchUserFamilyRelation = async () => {
-      if (!auth.currentUser) { setLoadingFamily(false); return; }
-      try {
-        const q = query(collection(db, 'family_members'), where('userId', '==', auth.currentUser.uid));
-        const querySnapshot = await getDocs(q);
-        if (!querySnapshot.empty) {
-          setFamilyId(querySnapshot.docs[0].data().familyId);
-        }
-      } catch (error) { console.error(error); } 
-      finally { setLoadingFamily(false); }
-    };
-    fetchUserFamilyRelation();
-  }, []);
+useEffect(() => {
+  const loadFamilyId = async () => {
+    try {
+      if (!auth.currentUser) return;
+
+      const id = await AsyncStorage.getItem('currentFamilyId');
+      console.log("📦 loaded familyId:", id);
+
+      setFamilyId(id);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingFamily(false);
+    }
+  };
+
+  loadFamilyId();
+}, []);
 
   useEffect(() => {
     if (!familyId) return;
@@ -194,22 +261,83 @@ const deleteCategory = async (category: Category) => {
     });
   }, [familyId]);
 
-  useEffect(() => {
-    if (!selectedCategory || !familyId) return;
-    const q = query(
-      collection(db, 'products'),
-      where('categoryId', '==', selectedCategory.id),
-      where('familyId', '==', familyId),
-      where('type', '==', activeTab)
-    );
-    return onSnapshot(q, (snap) => {
-      let data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
-      if (activeTab === 'preorder') {
-        data.sort((a, b) => MONTHS.indexOf(a.arrivalMonth!) - MONTHS.indexOf(b.arrivalMonth!));
+useEffect(() => {
+  if (!selectedCategory?.id || !familyId) return;
+
+  console.log("🔄 subscribe products...");
+
+  const q = query(
+    collection(db, 'products'),
+    where('categoryId', '==', selectedCategory.id),
+    where('familyId', '==', familyId),
+    where('type', '==', activeTab)
+  );
+
+  const unsubscribe = onSnapshot(q, (snap) => {
+    const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as Product));
+
+    console.log("📦 products snapshot:", data.length);
+
+    if (activeTab === 'preorder') {
+      data.sort((a, b) =>
+        MONTHS.indexOf(a.arrivalMonth ?? '未定') -
+        MONTHS.indexOf(b.arrivalMonth ?? '未定')
+      );
+    }
+
+    const prevMap = prevProductsRef.current;
+
+    data.forEach((product) => {
+      const prev = prevMap.get(product.id);
+
+      const key = `${familyId}_${product.id}`;
+
+      const isNowNeedBuy =
+        product.consumableType === 'count'
+          ? (product.stock ?? 0) <= (product.safeStock ?? 0)
+          : product.consumableType === 'liquid'
+            ? product.isLiquidAdequate !== true  
+            : false;
+
+      const wasNeedBuy =
+        prev
+          ? prev.consumableType === 'count'
+            ? (prev.stock ?? 0) <= (prev.safeStock ?? 0)
+            : prev.consumableType === 'liquid'
+              ? product.isLiquidAdequate !== true
+              : false
+          : false;
+
+      // ✅ 只觸發 false → true
+      if (!wasNeedBuy && isNowNeedBuy) {
+        if (!triggerCacheRef.current.has(key)) {
+          triggerCacheRef.current.add(key);
+          checkAndPushToFamilyWishlist(product);
+        }
       }
-      setProducts(data);
+
+      // ✅ 恢復正常狀態 → 清除鎖
+      if (!isNowNeedBuy) {
+        triggerCacheRef.current.delete(key);
+        pushedRef.current.delete(key);
+      }
     });
-  }, [selectedCategory, activeTab, familyId]);
+
+    // ✅ 更新快取（一定要在最後）
+    prevProductsRef.current = new Map(
+      data.map(p => [p.id, p])
+    );
+
+    setProducts(data);
+  });
+
+  // ⭐⭐⭐ 關鍵修正：cleanup listener（避免重複6倍問題）
+  return () => {
+    console.log("🧹 unsubscribe products");
+    unsubscribe();
+  };
+
+}, [selectedCategory?.id, activeTab, familyId]);
 
   const showAlert = (title: string, msg: string, onConfirm?: () => void) => {
     setAlertConfig({ visible: true, title, msg, onConfirm });

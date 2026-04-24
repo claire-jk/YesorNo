@@ -36,6 +36,7 @@ import {
     collection,
     deleteDoc,
     doc,
+    getDoc,
     getDocs,
     onSnapshot,
     orderBy,
@@ -246,17 +247,57 @@ export default function Home() {
 
             const qFamMember = query(collection(db, 'family_members'), where('userId', '==', user.uid));
             unsubFamMembers = onSnapshot(qFamMember, async (snap) => {
-                if (snap.empty) { setFamilies([]); setCurrentFamily(null); setIsDataInitialized(true); return; }
-                const famIds = Array.from(new Set(snap.docs.map(d => d.data().familyId)));
-                const famDataList: Family[] = [];
-                for (const fId of famIds) {
-                    const fDoc = await getDocs(query(collection(db, 'families'), where('__name__', '==', fId)));
-                    fDoc.forEach(d => famDataList.push({ id: d.id, ...d.data() } as Family));
+                if (snap.empty) { 
+                    setFamilies([]); 
+                    setCurrentFamily(null); 
+                    setIsDataInitialized(true); 
+
+                    // ⭐ 清掉殘留 familyId
+                    await AsyncStorage.removeItem('currentFamilyId');
+
+                    return; 
                 }
+                const famIds = Array.from(new Set(
+                snap.docs
+                    .map(d => d.data().familyId)
+                    .filter(id => id && id.trim() !== "")
+                ));
+                const famDataList: Family[] = await Promise.all(
+                famIds.map(async (fId) => {
+                    const snap = await getDoc(doc(db, 'families', fId));
+                    if (!snap.exists()) return null;
+
+                    return {
+                    id: snap.id,
+                    ...snap.data()
+                    } as Family;
+                })
+                ).then(res => res.filter(Boolean) as Family[]);
                 setFamilies(famDataList);
                 const savedId = await AsyncStorage.getItem('currentFamilyId');
-                let targetFamily = savedId ? famDataList.find(f => f.id === savedId) : famDataList[0];
-                setCurrentFamily(targetFamily || famDataList[0]);
+                let targetFamily = famDataList.find(f => f.id === savedId);
+
+                // ❗ 如果 AsyncStorage 裡的 ID 已經失效（被刪掉的家庭）
+                if (!targetFamily && famDataList.length > 0) {
+                    targetFamily = famDataList[0];
+
+                    // ⭐ 關鍵：同步更新 AsyncStorage（避免一直抓舊的）
+                    await AsyncStorage.setItem('currentFamilyId', targetFamily.id);
+                }
+                if (!targetFamily || !famDataList.find(f => f.id === savedId)) {
+                await AsyncStorage.setItem('currentFamilyId', targetFamily?.id || '');
+                }
+                console.log("🏠 families:", famDataList.map(f => f.id));
+                console.log("💾 savedId:", savedId);
+                console.log("🔥 famDataList:", famDataList.map(f => f.id));
+                console.log("🎯 targetFamily:", targetFamily?.id);              
+
+                const finalFamily = targetFamily || famDataList[0] || null;
+                setCurrentFamily(finalFamily);
+
+                if (finalFamily) {
+                    await AsyncStorage.setItem('currentFamilyId', finalFamily.id);
+                }
                 setIsDataInitialized(true);
             });
         });
@@ -265,6 +306,7 @@ export default function Home() {
 
     useEffect(() => {
         if (!currentFamily) { setFamilyWishList([]); return; }
+        console.log("👀 currentFamily:", currentFamily.id);
         const qFamWish = query(collection(db, 'family_wishlist'), where('familyId', '==', currentFamily.id), orderBy('createdAt', 'desc'));
         return onSnapshot(qFamWish, (snap) => {
             setFamilyWishList(snap.docs.map(d => ({ id: d.id, ...d.data() } as WishItem)));
@@ -524,6 +566,7 @@ export default function Home() {
                                         </TouchableOpacity>
                                     </View>
                                 )}
+                                
                                 <WishSection 
                                     title="家庭需購 🏠" 
                                     items={familyWishList} 
