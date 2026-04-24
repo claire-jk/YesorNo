@@ -587,6 +587,20 @@ useEffect(() => {
               <ScalePressable 
                 style={[styles.categoryCard, { backgroundColor: Colors.card, borderColor: Colors.border, borderWidth: 1 }]}
                 onPress={() => { setSelectedCategory(cat); setViewLevel('detail'); }}
+                // 👇 新增：長按刪除分類
+                onLongPress={() => {
+                  showAlert(
+                    "刪除分類",
+                    `確定要刪除「${cat.name}」嗎？（分類內商品也會保留或需你自行處理）`,
+                    async () => {
+                      try {
+                        await deleteDoc(doc(db, 'categories', cat.id));
+                      } catch (e) {
+                        showAlert("錯誤", "刪除失敗");
+                      }
+                    }
+                  );
+                }}
               >
                 <View style={[styles.bubbleIcon, { backgroundColor: Colors.primary + '15' }]}>
                   <Ionicons name={cat.isConsumable ? "flask-outline" : "cube-outline"} size={26} color={Colors.primary} />
@@ -615,7 +629,10 @@ useEffect(() => {
 
       {/* --- 自定義美化提示框 (Custom Alert Modal) --- */}
       <Modal visible={customAlert.show} transparent animationType="fade">
-        <View style={styles.alertOverlay}>
+        <Pressable
+          style={styles.alertOverlay}
+          onPress={() => setCustomAlert({ ...customAlert, show: false })}
+        >
           <FadeInView style={[styles.alertBox, { backgroundColor: Colors.card }]}>
             <View style={[styles.alertIconCircle, {backgroundColor: Colors.primary + '15'}]}>
                <Ionicons name="notifications-outline" size={30} color={Colors.primary} />
@@ -645,7 +662,7 @@ useEffect(() => {
               </TouchableOpacity>
             </View>
           </FadeInView>
-        </View>
+        </Pressable>
       </Modal>
 
       {/* --- 新增/編輯商品 Modal --- */}

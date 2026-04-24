@@ -99,6 +99,39 @@ const moveToCategory = async (targetCategoryId: string) => {
   }
 };
 
+const deleteCategory = async (category: Category) => {
+  if (!familyId) return;
+
+  showAlert(
+    '刪除分類',
+    `確定要刪除「${category.name}」嗎？分類內商品也會被保留但失去分類。`,
+    async () => {
+      try {
+        // 1. 刪除分類
+        await deleteDoc(doc(db, 'categories', category.id));
+
+        // 2. （可選但建議）把該分類的商品解除分類
+        const q = query(
+          collection(db, 'products'),
+          where('categoryId', '==', category.id)
+        );
+
+        const snap = await getDocs(q);
+
+        snap.forEach(async (d) => {
+          await updateDoc(doc(db, 'products', d.id), {
+            categoryId: null,
+            updatedAt: serverTimestamp(),
+          });
+        });
+
+      } catch (e) {
+        showAlert('錯誤', '刪除失敗');
+      }
+    }
+  );
+};
+
   const Colors = {
     bg: isDarkMode ? '#0F0F12' : '#F8FAFC',
     card: isDarkMode ? '#1C1C23' : '#FFFFFF',
@@ -274,7 +307,12 @@ const moveToCategory = async (targetCategoryId: string) => {
 
   const CustomAlert = () => (
     <Modal visible={alertConfig.visible} transparent animationType="fade">
-      <View style={styles.alertOverlay}>
+      <Pressable
+        style={styles.alertOverlay}
+        onPress={() =>
+          setAlertConfig({ ...alertConfig, visible: false })
+        }
+      >
         <MotiView 
           from={{ scale: 0.8, opacity: 0 }} 
           animate={{ scale: 1, opacity: 1 }} 
@@ -300,7 +338,7 @@ const moveToCategory = async (targetCategoryId: string) => {
             </TouchableOpacity>
           </View>
         </MotiView>
-      </View>
+      </Pressable>
     </Modal>
   );
 
@@ -449,6 +487,8 @@ const moveToCategory = async (targetCategoryId: string) => {
                       { backgroundColor: Colors.card, shadowColor: Colors.glow, borderColor: Colors.border, borderWidth: 1, transform: [{ scale: pressed ? 0.96 : 1 }] }
                     ]}
                     onPress={() => { setSelectedCategory(cat); setViewLevel('detail'); }}
+                    onLongPress={() => deleteCategory(cat)}   // ⭐ 加這行
+                    delayLongPress={500}                      // ⭐ 建議加這行（防誤觸）
                   >
                     <View style={[styles.iconCircle, { backgroundColor: Colors.inputBg }]}>
                       <Ionicons name={cat.isConsumable ? "fast-food" : "cube"} size={22} color={Colors.primary} />
