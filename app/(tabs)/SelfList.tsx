@@ -667,8 +667,15 @@ useEffect(() => {
 
       {/* --- 新增/編輯商品 Modal --- */}
       <Modal visible={prodModalVisible} transparent animationType="slide" onRequestClose={closeProdModal}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.overlay}>
-          <View style={[styles.modalCard, { backgroundColor: Colors.card, height: '90%' }]}>
+        <Pressable
+          style={styles.overlay}
+          onPress={closeProdModal}
+        >
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <Pressable
+              style={[styles.modalCard, { backgroundColor: Colors.card, height: '90%' }]}
+              onPress={(e) => e.stopPropagation()}
+            >
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '加入清單'}</Text>
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
@@ -821,14 +828,21 @@ useEffect(() => {
                 {isUploading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.mainBtnText}>{isEditing ? '更新內容' : '確認新增'}</Text>}
               </TouchableOpacity>
             </View>
-          </View>
+          </Pressable>
         </KeyboardAvoidingView>
+        </Pressable>
       </Modal>
 
       {/* --- 新增分類 Modal --- */}
       <Modal visible={catModalVisible} transparent animationType="fade" onRequestClose={() => setCatModalVisible(false)}>
-        <View style={styles.overlay}>
-          <View style={[styles.modalCard, { backgroundColor: Colors.card, height: 'auto', paddingBottom: insets.bottom + 40 }]}>
+        <Pressable
+          style={styles.overlay}
+          onPress={() => setCatModalVisible(false)}
+        >
+          <Pressable
+            style={[styles.modalCard, { backgroundColor: Colors.card, height: 'auto', paddingBottom: insets.bottom + 40 }]}
+            onPress={(e) => e.stopPropagation()}
+          >
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>建立新分類</Text>
             <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="例如：彩妝、模型..." placeholderTextColor={Colors.subText} value={newCatName} onChangeText={setNewCatName} />
@@ -844,8 +858,8 @@ useEffect(() => {
                 setNewCatName(''); setCatModalVisible(false);
               }}><Text style={styles.mainBtnText}>確認建立</Text></TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
       {/* --- 移動商品 Modal --- */}
       <Modal visible={moveModalVisible} transparent animationType="fade">

@@ -641,7 +641,12 @@ useEffect(() => {
       <CustomAlert />
 
       <Modal visible={catModalVisible} transparent animationType="fade">
-        <View style={styles.overlay}>
+        <Pressable
+          style={styles.overlay}
+          onPress={() => setCatModalVisible(false)}
+        >
+          {/* 防止點到內容也關掉 */}
+          <Pressable onPress={() => {}} style={{ width: '100%', alignItems: 'center' }}>
           <MotiView from={{ translateY: 300 }} animate={{ translateY: 0 }} style={[styles.modalCard, { backgroundColor: Colors.card }]}>
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>建立家庭分類</Text>
@@ -659,11 +664,19 @@ useEffect(() => {
               }}><Text style={styles.mainBtnText}>確認建立</Text></TouchableOpacity>
             </View>
           </MotiView>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <Modal visible={prodModalVisible} transparent animationType="slide">
-        <View style={styles.overlay}>
+        <Pressable
+          style={styles.overlay}
+          onPress={closeProdModal}
+        >
+          <Pressable
+            style={{ width: '100%', alignItems: 'center' }}
+            onPress={() => {}}
+          >
           <View style={[styles.modalCard, { backgroundColor: Colors.card, height: '90%' }]}>
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '新增物品'}</Text>
@@ -781,7 +794,8 @@ useEffect(() => {
               </TouchableOpacity>
             </View>
           </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
       {/* 移動分類 Modal */}
       <Modal
