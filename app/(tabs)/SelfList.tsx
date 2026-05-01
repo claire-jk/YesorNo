@@ -682,9 +682,9 @@ useEffect(() => {
           style={styles.overlay}
           onPress={closeProdModal}
         >
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <KeyboardAvoidingView  behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <Pressable
-              style={[styles.modalCard, { backgroundColor: Colors.card, height: '90%' }]}
+              style={[styles.modalCard, { backgroundColor: Colors.card,maxHeight: '85%', width: '100%',}]}
               onPress={(e) => e.stopPropagation()}
             >
             <View style={styles.modalIndicator} />
@@ -1088,10 +1088,27 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3, shadowRadius: 10, 
     overflow: 'hidden', zIndex: 999
   },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.75)',
+    justifyContent: 'flex-end',
+    alignItems: 'stretch',
+  },
   fabInner: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
-  overlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.75)', justifyContent: 'flex-end' },
+  
   modalIndicator: { width: 45, height: 6, backgroundColor: '#CBD5E1', borderRadius: 3, alignSelf: 'center', marginBottom: 25, opacity: 0.5 },
-  modalCard: { width: '100%', borderTopLeftRadius: 45, borderTopRightRadius: 45, padding: 25, alignItems: 'center', elevation: 20 },
+  modalCard: {
+    width: '100%',
+    borderTopLeftRadius: 45,
+    borderTopRightRadius: 45,
+    padding: 25,
+    paddingBottom: 30, // 👈 關鍵（避免底部懸空感）
+    alignItems: 'center',
+    elevation: 20,
+    marginBottom: 0, // 👈 強制貼底
+    maxHeight: '85%', 
+    marginTop: 'auto',
+  },
   modalHeader: { fontSize: 24, fontFamily: 'ZenKurenaido', marginBottom: 25 },
   modalInput: { width: '100%', padding: 18, borderRadius: 20, marginBottom: 15, fontFamily: 'ZenKurenaido', fontSize: 16, borderWidth: 1, borderColor: 'rgba(0,0,0,0.02)' },
   formLabel: { alignSelf: 'flex-start', marginBottom: 12, fontSize: 15, fontFamily: 'ZenKurenaido'},

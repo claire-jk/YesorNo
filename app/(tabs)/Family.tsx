@@ -680,10 +680,9 @@ useEffect(() => {
           onPress={closeProdModal}
         >
           <Pressable
-            style={{ width: '100%', alignItems: 'center' }}
-            onPress={() => {}}
+            style={{ width: '100%', alignItems: 'center' }} pointerEvents="box-none"
           >
-          <View style={[styles.modalCard, { backgroundColor: Colors.card, height: '90%' }]}>
+          <View style={[styles.modalCard, { backgroundColor: Colors.card,maxHeight: '90%' }]}>
             <View style={styles.modalIndicator} />
             <Text style={[styles.modalHeader, { color: Colors.text }]}>{isEditing ? '修改內容' : '新增物品'}</Text>
             <ScrollView showsVerticalScrollIndicator={false} style={{ width: '100%' }}>
@@ -693,6 +692,7 @@ useEffect(() => {
                 )}
               </TouchableOpacity>
               <Text style={[styles.inputLabel, { color: Colors.text }]}>物品名稱</Text>
+              <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="請輸入名稱" placeholderTextColor={Colors.subText} value={productForm.name} onChangeText={t => setProductForm({...productForm, name: t})} />
               <Text style={[styles.inputLabel, { color: Colors.text }]}>放置位置</Text>
               <TextInput
                 style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
@@ -701,7 +701,6 @@ useEffect(() => {
                 value={productForm.location}
                 onChangeText={t => setProductForm({ ...productForm, location: t })}
               />
-              <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="請輸入名稱" placeholderTextColor={Colors.subText} value={productForm.name} onChangeText={t => setProductForm({...productForm, name: t})} />
                 {activeTab === 'owned' ? (
                   <>
                     <Text style={[styles.inputLabel, { color: Colors.text }]}>金額</Text>
@@ -824,7 +823,7 @@ useEffect(() => {
           onPress={() => setMoveModalVisible(false)}
         >
           {/* 內容區（阻止冒泡） */}
-          <Pressable style={{ width: '100%', alignItems: 'center' }} onPress={() => {}}>
+          <Pressable onPress={(e) => e.stopPropagation()}>
 
             <View
               style={[
@@ -977,6 +976,7 @@ const styles = StyleSheet.create({
     padding: 20,
     alignItems: 'center',
     width: '100%',
+    marginTop: 'auto',
   },
 
   modalIndicator: {
