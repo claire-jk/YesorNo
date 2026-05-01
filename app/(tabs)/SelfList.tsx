@@ -69,6 +69,7 @@ interface Product {
   url?: string;
   type: 'owned' | 'preorder';
   lastAutoAddedAt?: number;
+  location?: string; //物品放置位置
 }
 
 // --- 進階微動畫封裝組件 ---
@@ -463,6 +464,16 @@ useEffect(() => {
                 <Image source={{ uri: item.image || 'https://via.placeholder.com/150' }} style={displayMode === 'grid' ? styles.gridImg : styles.listImg} />
                 <View style={styles.infoArea}>
                   <Text style={[styles.itemName, { color: Colors.text }]} numberOfLines={1}>{item.name}</Text>
+                  {item.location ? (
+                    <Text style={{ 
+                      fontSize: 12, 
+                      color: Colors.subText,
+                      fontFamily: 'ZenKurenaido',
+                      marginTop: 2
+                    }}>
+                      📍 {item.location}
+                    </Text>
+                  ) : null}
                   {activeTab === 'owned' ? (
                     <View>
                       <Text style={[styles.priceTag, { color: Colors.primary }]}>$ {item.price || '0'}</Text>
@@ -698,6 +709,13 @@ useEffect(() => {
               </TouchableOpacity>
               <Text style={[styles.formLabel, {color: Colors.text}]}>基本資料</Text>
               <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="物品名稱" value={productForm.name} placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, name: t})} />
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
+                placeholder="放置位置（例如：書桌抽屜、衣櫃上層）"
+                placeholderTextColor={Colors.subText}
+                value={productForm.location}
+                onChangeText={t => setProductForm({ ...productForm, location: t })}
+              />                
               {activeTab === 'owned' ? (
                 <>
                   <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="購入價格" value={productForm.price} keyboardType="numeric" placeholderTextColor={Colors.subText} onChangeText={t => setProductForm({...productForm, price: t})} />

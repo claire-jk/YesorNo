@@ -37,6 +37,7 @@ interface ScanResult {
   stock?: number;
   isSufficient?: boolean;
   score?: number;
+  location?: string; // ⭐新增
 }
 
 export default function ScanScreen() {
@@ -63,6 +64,17 @@ export default function ScanScreen() {
     subText: isDarkMode ? '#A1A1AA' : '#64748B',
     cardBg: isDarkMode ? 'rgba(30, 30, 38, 0.95)' : 'rgba(255, 255, 255, 0.9)',
   };
+
+useEffect(() => {
+  fetch("https://pybackend-i3qu.onrender.com/version")
+    .then(res => res.json())
+    .then(data => {
+      console.log("🔥 BACKEND VERSION:", data);
+    })
+    .catch(err => {
+      console.log("❌ VERSION CHECK FAILED:", err);
+    });
+}, []);
 
   useEffect(() => {
     if (isScanning) {
@@ -124,6 +136,7 @@ export default function ScanScreen() {
 
       const resData = await response.json();
 console.log("--- [App Debug] 伺服器回傳內容:", resData);
+console.log(auth.app.options.projectId);
 
       if (resData.status === 'success') {
         setResult({
@@ -131,7 +144,8 @@ console.log("--- [App Debug] 伺服器回傳內容:", resData);
           name: resData.data.name,
           stock: resData.data.stock || 0,
           isSufficient: (resData.data.stock || 0) > 1,
-          score: resData.data.score
+          score: resData.data.score,
+          location: resData?.data?.location ?? '未設定'
         });
       } else {
         setResult({ 
@@ -283,27 +297,22 @@ console.log("--- [App Debug] 伺服器回傳內容:", resData);
                   <Text style={[styles.zenText, { color: result.status === 'owned' ? Colors.success : Colors.primary, fontSize: 14 }]}>
                     {result.status === 'owned' ? '● 已在您的清單中' : '○ 偵測到新物品'}
                   </Text>
-                </View>
-              </View>
-              
-              <View style={{ marginTop: 15, marginLeft: 50 }}>
-                {result.status === 'owned' ? (
-                  <Text style={[styles.tagDetail, styles.zenText, { color: Colors.subText }]}>
-                    {`目前庫存量：${result.stock} 件\n辨識度：${((result.score || 0.9) * 100).toFixed(0)}%\n狀態：${result.isSufficient ? '充足' : '建議補充'}`}
+                  <Text style={styles.rowText}>
+                    目前庫存量：{result.stock} 件
                   </Text>
-                ) : (
-                  <View>
-                    <Text style={[styles.zenText, { color: Colors.subText, fontSize: 14, marginBottom: 15 }]}>
-                      系統辨識為「{result.name}」，但不在您的清單中。
-                    </Text>
-                    <TouchableOpacity 
-                      onPress={() => { setSearchName(result.name); setShowAddModal(true); }} 
-                      style={[styles.addBtn, { backgroundColor: Colors.primary }]}
-                    >
-                      <Text style={styles.addBtnText}>+ 加入庫存</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+
+                  <Text style={styles.rowText}>
+                    辨識度：{((result.score || 0.9) * 100).toFixed(0)}%
+                  </Text>
+
+                  <Text style={styles.rowText}>
+                    位置：{result.location?.trim() ? result.location : '未設定'}
+                  </Text>
+
+                  <Text style={styles.rowText}>
+                    狀態：{result.isSufficient ? '充足' : '建議補充'}
+                  </Text>
+                </View>
               </View>
 
               <TouchableOpacity onPress={() => setResult(null)} style={styles.closeTag}>
@@ -404,4 +413,10 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   cancelBtn: { padding: 12, marginRight: 10 },
   confirmBtn: { paddingVertical: 14, paddingHorizontal: 20, borderRadius: 18 },
+  rowText: {
+    fontFamily: 'ZenKurenaido',
+    color: '#FFF',
+    fontSize: 14,
+    lineHeight: 22
+  }
 });

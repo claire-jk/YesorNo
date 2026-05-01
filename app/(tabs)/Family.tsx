@@ -70,6 +70,7 @@ interface Product {
   stock?: number;                 // 數量型
   safeStock?: number;             // ⭐ 安全庫存
   isLiquidAdequate?: boolean;     // ⭐ 液態型
+  location?: string; // ⭐ 新增：放置位置
 }
 
 export default function FamilyList() {
@@ -513,6 +514,11 @@ useEffect(() => {
               <Image source={{ uri: item.image || 'https://via.placeholder.com/150' }} style={displayMode === 'grid' ? styles.gridImg : styles.listImg} />
               <View style={styles.infoArea}>
                 <Text style={[styles.itemName, { color: Colors.text }]} numberOfLines={1}>{item.name}</Text>
+                {item.location && (
+                  <Text style={[styles.stockText, { color: Colors.subText }]}>
+                    📍 {item.location}
+                  </Text>
+                )}
                 {activeTab === 'owned' ? (
                   <>
                     <Text style={[styles.priceTag, { color: Colors.primary }]}>$ {item.price || '0'}</Text>
@@ -687,6 +693,14 @@ useEffect(() => {
                 )}
               </TouchableOpacity>
               <Text style={[styles.inputLabel, { color: Colors.text }]}>物品名稱</Text>
+              <Text style={[styles.inputLabel, { color: Colors.text }]}>放置位置</Text>
+              <TextInput
+                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
+                placeholder="例如：冰箱上層 / 書桌抽屜"
+                placeholderTextColor={Colors.subText}
+                value={productForm.location}
+                onChangeText={t => setProductForm({ ...productForm, location: t })}
+              />
               <TextInput style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]} placeholder="請輸入名稱" placeholderTextColor={Colors.subText} value={productForm.name} onChangeText={t => setProductForm({...productForm, name: t})} />
                 {activeTab === 'owned' ? (
                   <>
