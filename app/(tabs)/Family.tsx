@@ -234,6 +234,43 @@ const checkAndPushToFamilyWishlist = async (product: Product) => {
   const [selectedImg, setSelectedImg] = useState<string | null>(null);
 
   const scrollX = useRef(new Animated.Value(0)).current;
+  // ⭐ 數量加減控制
+  const updateNumberField = (
+    field: 'stock' | 'safeStock',
+    delta: number
+  ) => {
+    setProductForm(prev => {
+      const current = Number(prev[field] ?? 0);
+      const newValue = Math.max(0, current + delta); // 不可小於 0
+
+      // --- ⭐ 新增的 AI 數據收集邏輯 ⭐ ---
+      // 條件：修改的是庫存(stock)、且是減少(-1)、且原本庫存大於0
+      if (field === 'stock' && delta === -1 && current > 0) {
+        const productId = prev.id; // 或者是正在編輯的 doc ID，請確保 prev 裡有 id 欄位
+        const userId = auth.currentUser?.uid;
+
+        if (productId && userId) {
+          // 這是非同步操作，我們直接讓它在背景執行，不卡住前端 UI 的防抖和更新
+          addDoc(collection(db, 'usage_history'), {
+            productId: productId,
+            userId: userId,
+            consumedAmount: 1, // 消耗 1 個
+            timestamp: new Date(), // 關鍵時間戳記（Grok 的食材！）
+            consumableType: 'count'
+          }).catch(err => {
+            console.error('AI 軌跡記錄失敗，但庫存仍正常扣除：', err);
+          });
+        }
+      }
+      // ------------------------------------
+
+      // 回傳原本的邏輯更新前端 UI（完全沒變）
+      return {
+        ...prev,
+        [field]: newValue,
+      };
+    });
+  };
 
 useEffect(() => {
   const loadFamilyId = async () => {
@@ -389,21 +426,75 @@ useEffect(() => {
     }
   };
 
-  const saveProduct = async () => {
+const saveProduct = async () => {
     if (!productForm.name || !selectedCategory || !familyId) {
         showAlert('注意', '請輸入必填欄位');
         return;
     }
     if (uploading) { showAlert('請稍候', '請等待圖片上傳完成'); return; }
-    const data = { ...productForm, categoryId: selectedCategory.id, familyId, type: activeTab, updatedAt: serverTimestamp() };
+    
+    const data = { 
+      ...productForm, 
+      categoryId: selectedCategory.id, 
+      familyId, 
+      type: activeTab, 
+      updatedAt: serverTimestamp() 
+    };
+
     try {
         if (isEditing && editingId) {
+          // ⭐【AI 軌跡紀錄核心邏輯 - 家庭共享防崩潰版】⭐
+          // 1. 從目前的 products 陣列中，找到這筆商品更新之前的原始狀態
+          const originalProduct = products.find(p => p.id === editingId);
+          const userId = auth.currentUser?.uid;
+
+          // 使用 originalProduct && userId 確保對象存在，防止 undefined 崩潰
+          if (originalProduct && userId) {
+            
+            // 2. 判斷【📦 數量型/庫存型】：新庫存比舊庫存少 -> 觸發紀錄
+            const oldStock = Number(originalProduct?.stock ?? 0);
+            const newStock = Number(productForm.stock ?? 0);
+
+            if (productForm.consumableType === 'count' && newStock < oldStock) {
+              const consumedAmount = oldStock - newStock;
+
+              await addDoc(collection(db, 'usage_history'), {
+                productId: editingId,
+                userId: userId,
+                familyId: familyId, 
+                consumedAmount: consumedAmount,
+                timestamp: new Date(),
+                consumableType: 'count'
+              });
+              console.log(`[AI 軌跡] 📦 成功記錄共享消耗：商品「${productForm.name}」消耗了 ${consumedAmount} 個`);
+            }
+
+            // 3. 判斷【💧 液態型】：如果原本是充足 (true)，被手動關閉成短缺 (false) -> 觸發紀錄
+            const oldStatus = originalProduct?.isLiquidAdequate !== false; // 預設沒設定時為 true (充足)
+            const newStatus = productForm.isLiquidAdequate === true;       // 目前畫面上的狀態
+
+            if (productForm.consumableType === 'liquid' && oldStatus && !newStatus) {
+              await addDoc(collection(db, 'usage_history'), {
+                productId: editingId,
+                userId: userId,
+                familyId: familyId, 
+                statusChangedTo: 'low',
+                timestamp: new Date(),
+                consumableType: 'liquid'
+              });
+              console.log(`[AI 軌跡] 💧 成功記錄共享液態短缺 (Switch 關閉)`);
+            }
+          }
+
+          // 4. 執行原本的家庭更新商品邏輯
           await updateDoc(doc(db, 'products', editingId), data);
         } else {
           await addDoc(collection(db, 'products'), { ...data, createdAt: serverTimestamp() });
         }
         closeProdModal();
-    } catch (e) { showAlert('錯誤', '儲存失敗'); }
+    } catch (e) { 
+        showAlert('錯誤', '儲存失敗'); 
+    }
   };
 
   const convertToOwned = async (item: Product) => {
@@ -746,27 +837,75 @@ useEffect(() => {
                           </View>
                         </View>
 
-                        {/* ⭐ 數量型 */}
-                        {productForm.consumableType === 'count' && (
-                          <>
-                            <Text style={[styles.inputLabel, { color: Colors.text }]}>目前庫存</Text>
-                            <TextInput
-                              style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
-                              keyboardType="numeric"
-                              value={productForm.stock?.toString()}
-                              onChangeText={t => setProductForm({...productForm, stock: parseInt(t) || 0})}
-                            />
+                      {/* ⭐ 數量型 */}
+                      {productForm.consumableType === 'count' && (
+                        <>
+                          <Text style={[styles.inputLabel, { color: Colors.text }]}>
+                            目前庫存
+                          </Text>
 
-                            <Text style={[styles.inputLabel, { color: Colors.text }]}>安全庫存</Text>
-                            <TextInput
-                              style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
-                              keyboardType="numeric"
-                              value={productForm.safeStock?.toString()}
-                              onChangeText={t => setProductForm({...productForm, safeStock: parseInt(t) || 0})}
-                            />
-                          </>
-                        )}
+                          <View
+                            style={[
+                              styles.counterBox,
+                              {
+                                backgroundColor: Colors.inputBg,
+                                borderColor: Colors.border,
+                              },
+                            ]}
+                          >
+                            <TouchableOpacity
+                              style={styles.counterBtn}
+                              onPress={() => updateNumberField('stock', -1)}
+                            >
+                              <Ionicons name="remove" size={20} color={Colors.text} />
+                            </TouchableOpacity>
 
+                            <Text style={[styles.counterValue, { color: Colors.text }]}>
+                              {productForm.stock ?? 0}
+                            </Text>
+
+                            <TouchableOpacity
+                              style={styles.counterBtn}
+                              onPress={() => updateNumberField('stock', 1)}
+                            >
+                              <Ionicons name="add" size={20} color={Colors.text} />
+                            </TouchableOpacity>
+                          </View>
+
+                          <Text style={[styles.inputLabel, { color: Colors.text }]}>
+                            安全庫存
+                          </Text>
+
+                          <View
+                            style={[
+                              styles.counterBox,
+                              {
+                                backgroundColor: Colors.inputBg,
+                                borderColor: Colors.border,
+                              },
+                            ]}
+                          >
+                            <TouchableOpacity
+                              style={styles.counterBtn}
+                              onPress={() => updateNumberField('safeStock', -1)}
+                            >
+                              <Ionicons name="remove" size={20} color={Colors.text} />
+                            </TouchableOpacity>
+
+                            <Text style={[styles.counterValue, { color: Colors.text }]}>
+                              {productForm.safeStock ?? 0}
+                            </Text>
+
+
+                            <TouchableOpacity
+                              style={styles.counterBtn}
+                              onPress={() => updateNumberField('safeStock', 1)}
+                            >
+                              <Ionicons name="add" size={20} color={Colors.text} />
+                            </TouchableOpacity>
+                          </View>
+                        </>
+                      )}
                         {/* ⭐ 液態型 */}
                         {productForm.consumableType === 'liquid' && (
                           <View style={styles.switchBox}>
@@ -1019,5 +1158,33 @@ const styles = StyleSheet.create({
   },
   text:{
     fontFamily: 'ZenKurenaido',
-  }
+  },
+
+counterBox: {
+  width: '100%',
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  borderRadius: 18,
+  paddingHorizontal: 14,
+  paddingVertical: 12,
+  marginBottom: 16,
+  borderWidth: 1,
+},
+
+counterBtn: {
+  width: 42,
+  height: 42,
+  borderRadius: 14,
+  justifyContent: 'center',
+  alignItems: 'center',
+  backgroundColor: 'rgba(124,105,239,0.12)',
+},
+
+counterValue: {
+  fontSize: 22,
+  fontFamily: 'ZenKurenaido',
+  minWidth: 60,
+  textAlign: 'center',
+},
 });

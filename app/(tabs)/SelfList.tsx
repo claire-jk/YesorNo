@@ -361,7 +361,7 @@ useEffect(() => {
     }
   };
 
-  const saveProduct = async () => {
+const saveProduct = async () => {
     if (!productForm.name || !selectedCategory) { 
       showAlert("提示", "請輸入物品名稱"); 
       return; 
@@ -386,6 +386,47 @@ useEffect(() => {
       };
 
       if (isEditing && editingId) { 
+        // ⭐【AI 軌跡紀錄核心邏輯】⭐
+        // 1. 從目前的 products 陣列中，撈出這筆物品在資料庫更新前的舊資料
+        const originalProduct = products.find(p => p.id === editingId);
+        const userId = auth.currentUser?.uid;
+
+        if (originalProduct && userId) {
+          // 2. 判斷【📦 庫存型】：如果修改後的新庫存小於舊庫存 -> 代表發生消耗
+          const oldStock = Number(originalProduct.stock ?? 0);
+          const newStock = Number(productForm.stock ?? 0);
+
+          if (productForm.consumableType === 'count' && newStock < oldStock) {
+            const consumedAmount = oldStock - newStock; // 算出少掉了幾包
+
+            // 默默寫入歷史紀錄集合
+            await addDoc(collection(db, 'usage_history'), {
+              productId: editingId,
+              userId: userId,
+              consumedAmount: consumedAmount,
+              timestamp: new Date(),
+              consumableType: 'count'
+            });
+            console.log(`[AI 軌跡] 📦 成功記錄：商品「${productForm.name}」消耗了 ${consumedAmount} 個`);
+          }
+
+          // 3. 判斷【💧 液態型】：如果狀態從「充足」被手動切換成「短缺」 -> 代表剛好用完
+          const oldStatus = originalProduct.liquidStatus;
+          const newStatus = productForm.liquidStatus;
+
+          if (productForm.consumableType === 'liquid' && oldStatus === 'enough' && newStatus === 'low') {
+            await addDoc(collection(db, 'usage_history'), {
+              productId: editingId,
+              userId: userId,
+              statusChangedTo: 'low',
+              timestamp: new Date(),
+              consumableType: 'liquid'
+            });
+            console.log(`[AI 軌跡] 💧 成功記錄：液態商品「${productForm.name}」變更為短缺`);
+          }
+        }
+
+        // 4. 執行你原本的更新商品邏輯
         await updateDoc(doc(db, 'products', editingId), data); 
       } else { 
         await addDoc(collection(db, 'products'), { 
@@ -395,7 +436,7 @@ useEffect(() => {
       }
       closeProdModal();
     } catch (error: any) { 
-      // 將具體的錯誤顯示出來，例如：Cloudinary 回傳的 "Invalid upload_preset"
+      // 將具體的錯誤顯示出來
       showAlert("儲存失敗", error.message || "請檢查網路連線或圖片格式"); 
     } finally { 
       setIsUploading(false); 
@@ -757,69 +798,153 @@ useEffect(() => {
                             ))}
                           </View>
 
-                          {/* 📦 庫存型 */}
-                          {productForm.consumableType === 'count' && (
-                            <>
-                              <TextInput
-                                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
-                                placeholder="目前庫存"
-                                keyboardType="numeric"
-                                value={productForm.stock?.toString()}
-                                onChangeText={t =>
-                                  setProductForm({ ...productForm, stock: parseInt(t) || 0 })
-                                }
-                              />
+{/* 📦 庫存型 */}
+{productForm.consumableType === 'count' && (
+  <>
+    {/* 目前庫存 */}
+    <Text style={[styles.formLabel, { color: Colors.text }]}>目前庫存</Text>
+    <View style={[styles.stockAdjustContainer, { backgroundColor: Colors.inputBg }]}>
+      {/* 減少按鈕（恢復單純的 UI 變更） */}
+      <TouchableOpacity
+        style={[styles.stockBtn, { backgroundColor: Colors.primary + '15' }]}
+        onPress={() => {
+          const currentStock = productForm.stock || 0;
+          if (currentStock > 0) {
+            setProductForm({ ...productForm, stock: currentStock - 1 });
+          }
+        }}
+      >
+        <Ionicons name="remove" size={22} color={Colors.primary} />
+      </TouchableOpacity>
 
-                              <TextInput
-                                style={[styles.modalInput, { backgroundColor: Colors.inputBg, color: Colors.text }]}
-                                placeholder="安全庫存量（低於提醒）"
-                                keyboardType="numeric"
-                                value={productForm.safeStock?.toString()}
-                                onChangeText={t =>
-                                  setProductForm({ ...productForm, safeStock: parseInt(t) || 0 })
-                                }
-                              />
-                            </>
-                          )}
+      {/* 數量 */}
+      <Text style={[styles.stockValue, { color: Colors.text }]}>{productForm.stock || 0}</Text>
 
-                          {/* 💧 液態型 */}
-                          {productForm.consumableType === 'liquid' && (
-                            <View style={{ flexDirection: 'row', marginBottom: 20 }}>
-                              {[
-                                { key: 'enough', label: '💧 充足' },
-                                { key: 'low', label: '⚠️ 短缺' }
-                              ].map(opt => (
-                                <TouchableOpacity
-                                  key={opt.key}
-                                  onPress={() =>
-                                    setProductForm({
-                                      ...productForm,
-                                      liquidStatus: opt.key as any
-                                    })
-                                  }
-                                  style={{
-                                    padding: 12,
-                                    borderRadius: 16,
-                                    marginRight: 10,
-                                    backgroundColor:
-                                      productForm.liquidStatus === opt.key
-                                        ? Colors.primary
-                                        : Colors.inputBg
-                                  }}
-                                >
-                                  <Text style={{
-                                    color:
-                                      productForm.liquidStatus === opt.key
-                                        ? '#FFF'
-                                        : Colors.text,
-                                    fontFamily: 'ZenKurenaido'
-                                  }}>
-                                    {opt.label}
-                                  </Text>
-                                </TouchableOpacity>
-                              ))}
-                            </View>
-                          )}
+      {/* 增加按鈕 */}
+      <TouchableOpacity
+        style={[styles.stockBtn, { backgroundColor: Colors.primary }]}
+        onPress={() => setProductForm({ ...productForm, stock: (productForm.stock || 0) + 1 })}
+      >
+        <Ionicons name="add" size={22} color="#FFF" />
+      </TouchableOpacity>
+    </View>
+
+    {/* 安全庫存 */}
+    <Text style={[styles.formLabel, { color: Colors.text }]}>
+      安全庫存量（低於提醒）
+    </Text>
+
+    <View
+      style={[
+        styles.stockAdjustContainer,
+        { backgroundColor: Colors.inputBg }
+      ]}
+    >
+      {/* 減少 */}
+      <TouchableOpacity
+        style={[
+          styles.stockBtn,
+          { backgroundColor: '#F59E0B15' }
+        ]}
+        onPress={() =>
+          setProductForm({
+            ...productForm,
+            safeStock: Math.max((productForm.safeStock || 0) - 1, 0)
+          })
+        }
+      >
+        <Ionicons
+          name="remove"
+          size={22}
+          color="#F59E0B"
+        />
+      </TouchableOpacity>
+
+      {/* 數量 */}
+      <Text
+        style={[
+          styles.stockValue,
+          { color: Colors.text }
+        ]}
+      >
+        {productForm.safeStock || 0}
+      </Text>
+
+      {/* 增加 */}
+      <TouchableOpacity
+        style={[
+          styles.stockBtn,
+          { backgroundColor: '#F59E0B' }
+        ]}
+        onPress={() =>
+          setProductForm({
+            ...productForm,
+            safeStock: (productForm.safeStock || 0) + 1
+          })
+        }
+      >
+        <Ionicons
+          name="add"
+          size={22}
+          color="#FFF"
+        />
+      </TouchableOpacity>
+    </View>
+  </>
+)}
+
+{/* 💧 液態型 */}
+{productForm.consumableType === 'liquid' && (
+  <View style={{ flexDirection: 'row', marginBottom: 20 }}>
+    {[
+      { key: 'enough', label: '💧 充足' },
+      { key: 'low', label: '⚠️ 短缺' }
+    ].map(opt => (
+      <TouchableOpacity
+        key={opt.key}
+        onPress={() => {
+          // 1. 更新前端 UI 狀態
+          setProductForm({
+            ...productForm,
+            liquidStatus: opt.key as any
+          });
+
+          // 2. ⭐ 當使用者手動切換到 "短缺 (low)" 時，代表用完了，也順手記錄一筆軌跡！
+          if (opt.key === 'low' && productForm.liquidStatus !== 'low') {
+            if (productForm.id && auth.currentUser?.uid) {
+              addDoc(collection(db, 'usage_history'), {
+                productId: productForm.id,
+                userId: auth.currentUser.uid,
+                statusChangedTo: 'low',
+                timestamp: new Date(),
+                consumableType: 'liquid'
+              }).catch(err => console.error('AI 液態記錄失敗：', err));
+            }
+          }
+        }}
+        style={{
+          padding: 12,
+          borderRadius: 16,
+          marginRight: 10,
+          backgroundColor:
+            productForm.liquidStatus === opt.key
+              ? Colors.primary
+              : Colors.inputBg
+        }}
+      >
+        <Text style={{
+          color:
+            productForm.liquidStatus === opt.key
+              ? '#FFF'
+              : Colors.text,
+          fontFamily: 'ZenKurenaido'
+        }}>
+          {opt.label}
+        </Text>
+      </TouchableOpacity>
+    ))}
+  </View>
+)}
                         </>
                       )}
                 </>
@@ -1127,4 +1252,27 @@ const styles = StyleSheet.create({
   justifyContent: 'center',
   alignItems: 'center'},
   monthPick: { paddingHorizontal: 22, paddingVertical: 12, borderRadius: 18, marginRight: 12, elevation: 2 },
+  stockAdjustContainer: {
+  width: '100%',
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  borderRadius: 24,
+  paddingHorizontal: 18,
+  paddingVertical: 16,
+  marginBottom: 20,
+},
+
+stockBtn: {
+  width: 52,
+  height: 52,
+  borderRadius: 18,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+stockValue: {
+  fontSize: 26,
+  fontFamily: 'ZenKurenaido',
+},
 });
