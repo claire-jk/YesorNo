@@ -8,6 +8,7 @@
     "scheme": "yesorno",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "privacy": "public",
     "ios": {
       "supportsTablet": true
     },
